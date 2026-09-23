@@ -1,0 +1,125 @@
+@import "tailwindcss";
+
+@theme {
+  --color-paper: #fafaf7;
+  --color-paper-dim: #dadad7;
+  --color-paper-low: #f4f4f1;
+  --color-paper-card: #ffffff;
+  --color-paper-border: #e6e5df;
+  --color-ink: #1c1b1f;
+  --color-ink-muted: #6b6966;
+  --color-thermal: #ff5a1f;
+  --color-thermal-hover: #e04b14;
+  --color-stamp-green: #1b7a4d;
+  --color-stamp-bg: #e6f7ee;
+  --color-stamp-text: #0b4e2f;
+  
+  --font-sans: var(--font-ibm-plex), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: var(--font-space-mono), "Courier New", monospace;
+}
+
+:root {
+  --background: #fafaf7;
+  --foreground: #1c1b1f;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Tactile Perforation Divider */
+.ticket-perforation {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  height: 16px;
+  overflow: visible;
+}
+
+.ticket-perforation::before,
+.ticket-perforation::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background-color: var(--color-paper);
+  z-index: 10;
+}
+
+.ticket-perforation::before {
+  left: -7px;
+  box-shadow: inset -1px 0 0 0 var(--color-paper-border);
+}
+
+.ticket-perforation::after {
+  right: -7px;
+  box-shadow: inset 1px 0 0 0 var(--color-paper-border);
+}
+
+.ticket-perforation-line {
+  flex: 1;
+  margin: 0 10px;
+  border-top: 2px dashed #dadad7;
+}
+
+/* Rubber Stamp Styling */
+.stamp-badge {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 2px;
+  line-height: 1;
+}
+
+.stamp-green {
+  border: 1.5px solid #1b7a4d;
+  color: #1b7a4d;
+  background-color: rgba(27, 122, 77, 0.06);
+}
+
+.stamp-orange {
+  border: 1.5px solid #ff5a1f;
+  color: #ff5a1f;
+  background-color: rgba(255, 90, 31, 0.06);
+}
+
+.stamp-ink {
+  border: 1.5px solid #1c1b1f;
+  color: #1c1b1f;
+  background-color: rgba(28, 27, 31, 0.05);
+}
+
+.stamp-tilt {
+  transform: rotate(-1.5deg);
+}
+
+/* Tactile Button Hard Shadow */
+.btn-tactile {
+  border: 1.5px solid #1c1b1f;
+  box-shadow: 2px 2px 0px #1c1b1f;
+  transition: transform 0.08s ease, box-shadow 0.08s ease;
+}
+
+.btn-tactile:active {
+  transform: translate(2px, 2px);
+  box-shadow: 0px 0px 0px #1c1b1f;
+}
+
+.card-tactile {
+  border: 1px solid var(--color-paper-border);
+  box-shadow: 0 1px 3px rgba(28, 27, 31, 0.04);
+}

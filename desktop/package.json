@@ -1,0 +1,109 @@
+{
+  "name": "quickprint-desktop",
+  "version": "2.4.0",
+  "description": "QuickPrint Standalone Desktop Counter OS & Print Agent for Windows, macOS, and Linux",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build:win": "set CSC_IDENTITY_AUTO_DISCOVERY=false && electron-builder --win --publish=never",
+    "build:mac": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --publish=never",
+    "build:linux": "electron-builder --linux --publish=never",
+    "build:all": "electron-builder --win --mac --linux --publish=never"
+  },
+  "keywords": [
+    "quickprint",
+    "kiosk",
+    "printer",
+    "counter-os",
+    "xerox",
+    "electron"
+  ],
+  "author": "QuickPrint Technologies",
+  "license": "Commercial",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.1",
+    "pdf-lib": "^1.17.1",
+    "qrcode": "^1.5.4",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "in.quickprint.counter-os",
+    "productName": "QuickPrint Counter OS",
+    "copyright": "Copyright © 2026 QuickPrint Technologies",
+    "forceCodeSigning": false,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "config.json",
+      "ui/**/*",
+      "assets/**/*",
+      "node_modules/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "QuickPrint Counter OS",
+      "uninstallDisplayName": "QuickPrint Counter OS",
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.icns",
+      "category": "public.app-category.business"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.png",
+      "category": "Office"
+    }
+  }
+}

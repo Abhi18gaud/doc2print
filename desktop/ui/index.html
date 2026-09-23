@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QuickPrint Counter OS</title>
+  <link rel="stylesheet" href="styles.css">
+  <!-- Google Fonts: Inter for ultra-crisp industrial UI typography -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+</head>
+<body class="industrial-theme">
+  <!-- CUSTOM APP TITLEBAR -->
+  <header class="app-titlebar">
+    <div class="titlebar-left">
+      <div class="app-brand">
+        <div class="brand-badge">QP</div>
+        <span class="brand-title">QuickPrint <span class="brand-subtitle">Counter OS</span></span>
+      </div>
+      <div class="status-indicator live" id="shopStatusIndicator">
+        <span class="pulse-dot"></span>
+        <span class="status-text" id="shopStatusText">Live — Accepting Orders</span>
+      </div>
+      <div class="printer-indicator" id="topPrinterIndicator">
+        <span class="printer-icon">🖨️</span>
+        <span class="printer-name" id="topPrinterName">Default: Detecting...</span>
+      </div>
+    </div>
+
+    <div class="titlebar-center">
+      <div class="auto-print-switch" id="autoPrintToggle">
+        <span class="switch-label">⚡ Auto-Print:</span>
+        <button class="toggle-btn active" id="btnAutoPrintState">ON</button>
+      </div>
+    </div>
+
+    <div class="titlebar-right">
+      <button class="icon-btn tv-btn" id="btnOpenTvBoardTitle" title="Open Waiting Area TV Board">
+        <span>📺 TV Board</span>
+      </button>
+      <button class="icon-btn qr-btn" id="btnShowCounterQR" title="Show Counter QR Code">
+        <span>📱 Counter QR</span>
+      </button>
+      <div class="window-controls">
+        <button class="win-btn win-min" id="winMinimize" title="Minimize">—</button>
+        <button class="win-btn win-max" id="winMaximize" title="Maximize">▢</button>
+        <button class="win-btn win-close" id="winClose" title="Close to Tray">✕</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- MAIN APPLICATION SHELL -->
+  <div class="app-shell" id="appShell">
+    <!-- LEFT SIDEBAR -->
+    <aside class="app-sidebar">
+      <div class="shop-card" id="sidebarShopCard">
+        <div class="shop-avatar" id="shopAvatar">QP</div>
+        <div class="shop-meta">
+          <h2 class="shop-name" id="shopNameDisplay">Loading Shop...</h2>
+          <span class="shop-slug" id="shopSlugDisplay">quickprint.in/kiosk/...</span>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <button class="nav-item active" data-view="queue">
+          <span class="nav-icon">📥</span>
+          <span class="nav-label">Live Queue</span>
+          <span class="nav-badge" id="queueBadge">0</span>
+        </button>
+        <button class="nav-item" data-view="history">
+          <span class="nav-icon">📑</span>
+          <span class="nav-label">Print Jobs Log</span>
+        </button>
+        <button class="nav-item" data-view="printers">
+          <span class="nav-icon">🖨️</span>
+          <span class="nav-label">Printers & Spooler</span>
+        </button>
+        <button class="nav-item" data-view="tv">
+          <span class="nav-icon">📺</span>
+          <span class="nav-label">Waiting Area TV</span>
+        </button>
+        <button class="nav-item" data-view="financials">
+          <span class="nav-icon">💰</span>
+          <span class="nav-label">Daily Earnings</span>
+        </button>
+        <button class="nav-item" data-view="pricing">
+          <span class="nav-icon">🏷️</span>
+          <span class="nav-label">Pricing Catalog</span>
+        </button>
+        <button class="nav-item" data-view="settings">
+          <span class="nav-icon">⚙️</span>
+          <span class="nav-label">Counter Settings</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="agent-engine-status">
+          <span class="engine-dot green"></span>
+          <div class="engine-text">
+            <span class="engine-title">Spooler Engine v2.4</span>
+            <span class="engine-sub" id="engineStatusSub">Active & Polling</span>
+          </div>
+        </div>
+        <div class="user-profile-row">
+          <div class="user-avatar" id="ownerInitial">O</div>
+          <div class="user-details">
+            <span class="user-email" id="ownerEmailDisplay">owner@quickprint.in</span>
+            <span class="user-role">Shop Manager</span>
+          </div>
+          <button class="btn-logout" id="btnLogout" title="Sign Out">🚪</button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- RIGHT MAIN CONTENT -->
+    <main class="app-content">
+      <!-- VIEW 1: LIVE QUEUE (COMMAND CENTER) -->
+      <section class="content-view active" id="view-queue">
+        <!-- TOP METRICS STRIP -->
+        <div class="metrics-grid">
+          <div class="metric-card">
+            <div class="metric-header">
+              <span class="metric-title">Today's Revenue</span>
+              <span class="metric-icon-badge green">₹</span>
+            </div>
+            <div class="metric-value" id="kpiRevenue">₹0.00</div>
+            <div class="metric-sub"><span class="badge-pill green">Live</span> Updated via UPI & Cash</div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-header">
+              <span class="metric-title">Queue Waiting</span>
+              <span class="metric-icon-badge amber">⏳</span>
+            </div>
+            <div class="metric-value" id="kpiQueueCount">0 Orders</div>
+            <div class="metric-sub" id="kpiQueueSub">0 pages pending spool</div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-header">
+              <span class="metric-title">Pages Printed</span>
+              <span class="metric-icon-badge blue">📄</span>
+            </div>
+            <div class="metric-value" id="kpiPagesPrinted">0 Sheets</div>
+            <div class="metric-sub">Across all connected trays</div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-header">
+              <span class="metric-title">Print Spooler</span>
+              <span class="metric-icon-badge green">✓</span>
+            </div>
+            <div class="metric-value" id="kpiSpoolerState">READY</div>
+            <div class="metric-sub" id="kpiDefaultPrinterSub">Windows Spooler Idle</div>
+          </div>
+        </div>
+
+        <!-- QUEUE CONTROLS HEADER -->
+        <div class="view-action-bar">
+          <div class="filter-pills">
+            <button class="filter-pill active" data-filter="all">All Jobs (<span id="filterAllCount">0</span>)</button>
+            <button class="filter-pill" data-filter="pending">Awaiting Print (<span id="filterPendingCount">0</span>)</button>
+            <button class="filter-pill" data-filter="paid">UPI Verified (<span id="filterPaidCount">0</span>)</button>
+            <button class="filter-pill" data-filter="cash">Cash at Counter (<span id="filterCashCount">0</span>)</button>
+          </div>
+
+          <div class="action-buttons-group">
+            <button class="btn btn-secondary btn-sm" id="btnRefreshQueue">
+              <span>↻ Refresh Queue</span>
+            </button>
+            <button class="btn btn-secondary btn-sm" id="btnPauseOrders">
+              <span id="btnPauseOrdersText">⏸️ Pause Orders</span>
+            </button>
+            <button class="btn btn-primary btn-sm" id="btnPrintAllPending">
+              <span>🖨️ Print Next (Enter)</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- ACTIVE QUEUE LIST -->
+        <div class="queue-container">
+          <div class="empty-queue-state" id="emptyQueueState">
+            <div class="empty-icon">🖨️</div>
+            <h3>Live Queue is Clear</h3>
+            <p>Customer orders from your QR standee will appear here instantly in real-time.</p>
+            <button class="btn btn-secondary btn-sm" id="btnSimulateOrder">
+              + Generate Test Counter Order
+            </button>
+          </div>
+
+          <div class="queue-cards-list" id="queueCardsList">
+            <!-- Dynamic order cards injected via JS -->
+          </div>
+        </div>
+      </section>
+
+      <!-- VIEW 2: PRINT HISTORY LOG -->
+      <section class="content-view" id="view-history">
+        <div class="view-header">
+          <div>
+            <h1 class="view-title">Print Jobs Log</h1>
+            <p class="view-subtitle">Audit trail of all processed customer documents and tokens</p>
+          </div>
+          <div class="header-actions">
+            <input type="text" class="input-search" id="historySearchInput" placeholder="Search by Token, Phone, or File...">
+            <button class="btn btn-secondary btn-sm" id="btnExportJobs">Export CSV</button>
+          </div>
+        </div>
+
+        <div class="table-container">
+          <table class="data-table" id="historyTable">
+            <thead>
+              <tr>
+                <th>TOKEN</th>
+                <th>TIMESTAMP</th>
+                <th>CUSTOMER</th>
+                <th>PAGES / COPIES</th>
+                <th>PRINT SPECS</th>
+                <th>AMOUNT</th>
+                <th>PAYMENT</th>
+                <th>STATUS</th>
+                <th>ACTIONS</th>
+              </tr>
+            </thead>
+            <tbody id="historyTableBody">
+              <!-- Rendered via JS -->
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- VIEW 3: PRINTERS & HARDWARE -->
+      <section class="content-view" id="view-printers">
+        <div class="view-header">
+          <div>
+            <h1 class="view-title">Printers & Hardware Manager</h1>
+            <p class="view-subtitle">Direct Windows OS spooler integration and printer routing</p>
+          </div>
+          <button class="btn btn-primary btn-sm" id="btnScanPrinters">
+            <span>🔍 Scan Windows Printers</span>
+          </button>
+        </div>
+
+        <div class="printers-grid" id="printersGrid">
+          <!-- Rendered via JS -->
+        </div>
+
+        <div class="printer-test-panel">
+          <h3>Hardware Spooler Diagnostics</h3>
+          <p>Send a real test ticket to verify page alignment, paper feeding, and spool speed.</p>
+          <div class="test-controls-row">
+            <select class="select-input" id="testPrinterSelect">
+              <option value="">Select target printer...</option>
+            </select>
+            <button class="btn btn-secondary" id="btnSendTestPrint">
+              🖨️ Send Hardware Test Page
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- VIEW: TV WAITING BOARD & MONITOR SETUP -->
+      <section class="content-view" id="view-tv">
+        <div class="view-header">
+          <div>
+            <h1 class="view-title">Waiting Area TV Display & Monitor Setup</h1>
+            <p class="view-subtitle">Live digital token board for waiting customers (#A-101, #A-102)</p>
+          </div>
+          <button class="btn btn-primary btn-sm" id="btnLaunchTvWindow">
+            🖥️ Launch Fullscreen TV Board (F11)
+          </button>
+        </div>
+
+        <div style="display:flex; flex-direction:column; gap:16px;">
+          <!-- TV URL Card -->
+          <div class="card-panel">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+              <h3>Live TV Board URL</h3>
+              <span class="badge-chip color">HDMI / SMART TV READY</span>
+            </div>
+            <p style="font-size:13px; color:var(--text-muted); margin-bottom:12px;">
+              Open this URL on your shop's wall-mounted Smart TV, Android TV, or second monitor:
+            </p>
+            <div style="display:flex; gap:10px; align-items:center; margin-bottom:16px;">
+              <input type="text" class="text-input" id="tvDisplayUrlInput" readonly style="font-family:monospace; font-weight:700; color:var(--primary); background:var(--bg-subtle);" value="https://quickprint.in/tv/counter">
+              <button class="btn btn-secondary btn-sm" id="btnCopyTvUrl">📋 Copy Link</button>
+              <button class="btn btn-secondary btn-sm" id="btnOpenTvBrowser">🌐 Open in Browser</button>
+            </div>
+
+            <!-- TV Screen Mockup Preview -->
+            <div style="background:#0F172A; border-radius:var(--radius-md); padding:20px; color:#FFFFFF;">
+              <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:10px; margin-bottom:14px;">
+                <span style="font-size:13px; font-weight:800; color:#38BDF8; letter-spacing:0.5px;">📺 WAITING AREA TV QUEUE</span>
+                <span style="font-size:11px; font-weight:600; color:#94A3B8;">Live Realtime Sync 🟢</span>
+              </div>
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; text-align:left;">
+                <div style="background:rgba(255,255,255,0.05); padding:16px; border-radius:8px; border-left:4px solid #38BDF8;">
+                  <span style="font-size:11px; font-weight:700; color:#38BDF8;">NOW PRINTING</span>
+                  <div style="font-size:26px; font-weight:900; font-family:monospace; margin-top:6px; color:#FFFFFF;">#A-104</div>
+                  <span style="font-size:11px; color:#94A3B8;">Rahul S. • 12p B&W Laser</span>
+                </div>
+                <div style="background:rgba(255,255,255,0.05); padding:16px; border-radius:8px; border-left:4px solid #10B981;">
+                  <span style="font-size:11px; font-weight:700; color:#34D399;">READY FOR PICKUP ✓</span>
+                  <div style="font-size:26px; font-weight:900; font-family:monospace; margin-top:6px; color:#34D399;">#A-103</div>
+                  <span style="font-size:11px; color:#94A3B8;">Counter Tray • Paid via UPI</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Hardware Setup Guide -->
+          <div class="card-panel">
+            <h3>How to Connect Your Shop TV / Monitor (2 Methods)</h3>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:14px;">
+              <div style="border:1px solid var(--border-subtle); padding:16px; border-radius:8px; background:var(--bg-subtle);">
+                <strong style="color:var(--text-primary); font-size:13px; display:block; margin-bottom:8px;">Method 1: HDMI Cable to TV (Recommended)</strong>
+                <ol style="padding-left:18px; font-size:12px; color:var(--text-secondary); line-height:1.7;">
+                  <li>Connect an HDMI cable from your PC to the TV / Monitor.</li>
+                  <li>Press <kbd style="background:#fff; border:1px solid #ccc; padding:1px 4px; border-radius:3px;">Win + P</kbd> on your keyboard and select <strong>Extend</strong>.</li>
+                  <li>Click <strong>Launch Fullscreen TV Board</strong> button above.</li>
+                  <li>Drag the TV window to your TV screen and press <kbd style="background:#fff; border:1px solid #ccc; padding:1px 4px; border-radius:3px;">F11</kbd> for fullscreen.</li>
+                </ol>
+              </div>
+
+              <div style="border:1px solid var(--border-subtle); padding:16px; border-radius:8px; background:var(--bg-subtle);">
+                <strong style="color:var(--text-primary); font-size:13px; display:block; margin-bottom:8px;">Method 2: Smart TV / FireStick / Android TV</strong>
+                <ol style="padding-left:18px; font-size:12px; color:var(--text-secondary); line-height:1.7;">
+                  <li>Turn on your Smart TV and open its built-in Web Browser.</li>
+                  <li>Type your shop's TV URL: <code style="color:var(--primary); font-weight:700;" id="tvSmartTvUrl">quickprint.in/tv/...</code></li>
+                  <li>Bookmark the page and press fullscreen on TV remote.</li>
+                  <li>It updates automatically via Wi-Fi with instant sound alerts when prints finish!</li>
+                </ol>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- VIEW 4: DAILY EARNINGS & COUNTERS -->
+      <section class="content-view" id="view-financials">
+        <div class="view-header">
+          <div>
+            <h1 class="view-title">Daily Financials & Paper Counters</h1>
+            <p class="view-subtitle">Track counter revenue, UPI settlements, and physical paper consumption</p>
+          </div>
+          <button class="btn btn-secondary btn-sm" id="btnRefreshEarnings">↻ Refresh Data</button>
+        </div>
+
+        <div class="financials-grid">
+          <div class="stat-box primary">
+            <span class="stat-label">Total Day's Gross</span>
+            <span class="stat-value" id="finTotalRevenue">₹0.00</span>
+            <span class="stat-footer">Today's completed orders</span>
+          </div>
+          <div class="stat-box success">
+            <span class="stat-label">UPI Online Payments</span>
+            <span class="stat-value" id="finUpiRevenue">₹0.00</span>
+            <span class="stat-footer">Direct bank settlement</span>
+          </div>
+          <div class="stat-box warning">
+            <span class="stat-label">Cash at Counter</span>
+            <span class="stat-value" id="finCashRevenue">₹0.00</span>
+            <span class="stat-footer">Collected in cash drawer</span>
+          </div>
+          <div class="stat-box info">
+            <span class="stat-label">Total Sheets Consumed</span>
+            <span class="stat-value" id="finPaperConsumed">0 A4</span>
+            <span class="stat-footer">Estimated physical paper count</span>
+          </div>
+        </div>
+
+        <div class="card-panel">
+          <h3>Paper Usage Breakdown</h3>
+          <div class="paper-breakdown-row">
+            <div class="paper-stat-item">
+              <span class="paper-stat-num" id="finBwPages">0</span>
+              <span class="paper-stat-desc">Black & White Pages</span>
+            </div>
+            <div class="paper-stat-item">
+              <span class="paper-stat-num" id="finColorPages">0</span>
+              <span class="paper-stat-desc">Full Color Pages</span>
+            </div>
+            <div class="paper-stat-item">
+              <span class="paper-stat-num" id="finDuplexSheets">0</span>
+              <span class="paper-stat-desc">Duplex (Double Sided)</span>
+            </div>
+            <div class="paper-stat-item">
+              <span class="paper-stat-num" id="finSingleSheets">0</span>
+              <span class="paper-stat-desc">Single Sided Sheets</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- VIEW 5: PRICING CATALOG -->
+      <section class="content-view" id="view-pricing">
+        <div class="view-header">
+          <div>
+            <h1 class="view-title">Pricing Catalog & Rate Card</h1>
+            <p class="view-subtitle">Set your shop's print rates shown on the customer kiosk scan screen</p>
+          </div>
+          <button class="btn btn-primary btn-sm" id="btnSavePricing">
+            💾 Save Rates to Cloud
+          </button>
+        </div>
+
+        <div class="pricing-cards-grid">
+          <div class="pricing-card">
+            <div class="pricing-card-header">
+              <h3>Black & White Printing</h3>
+              <span class="badge-chip">Standard Laser</span>
+            </div>
+            <div class="pricing-field">
+              <label>Single Sided (per page)</label>
+              <div class="input-currency">
+                <span>₹</span>
+                <input type="number" id="rateBwSingle" value="2.00" step="0.5">
+              </div>
+            </div>
+            <div class="pricing-field">
+              <label>Double Sided (per sheet - both sides)</label>
+              <div class="input-currency">
+                <span>₹</span>
+                <input type="number" id="rateBwDouble" value="3.00" step="0.5">
+              </div>
+            </div>
+          </div>
+
+          <div class="pricing-card">
+            <div class="pricing-card-header">
+              <h3>Full Color Printing</h3>
+              <span class="badge-chip color">Inkjet / Color Laser</span>
+            </div>
+            <div class="pricing-field">
+              <label>Single Sided (per page)</label>
+              <div class="input-currency">
+                <span>₹</span>
+                <input type="number" id="rateColorSingle" value="10.00" step="1.0">
+              </div>
+            </div>
+            <div class="pricing-field">
+              <label>Double Sided (per sheet - both sides)</label>
+              <div class="input-currency">
+                <span>₹</span>
+                <input type="number" id="rateColorDouble" value="18.00" step="1.0">
+              </div>
+            </div>
+          </div>
+
+          <div class="pricing-card">
+            <div class="pricing-card-header">
+              <h3>Finishing & Services</h3>
+              <span class="badge-chip">Counter Add-ons</span>
+            </div>
+            <div class="pricing-field">
+              <label>Spiral Binding (per booklet)</label>
+              <div class="input-currency">
+                <span>₹</span>
+                <input type="number" id="rateSpiralBinding" value="30.00" step="5.0">
+              </div>
+            </div>
+            <div class="pricing-field">
+              <label>Corner Stapling (flat fee)</label>
+              <div class="input-currency">
+                <span>₹</span>
+                <input type="number" id="rateStapling" value="2.00" step="1.0">
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- VIEW 6: SETTINGS -->
+      <section class="content-view" id="view-settings">
+        <div class="view-header">
+          <div>
+            <h1 class="view-title">Counter OS Settings</h1>
+            <p class="view-subtitle">Configure system startup, printer defaults, and notifications</p>
+          </div>
+          <button class="btn btn-primary btn-sm" id="btnSaveSettings">Save Preferences</button>
+        </div>
+
+        <div class="settings-sections">
+          <div class="settings-group">
+            <h3>Windows System Integration</h3>
+            <div class="setting-item">
+              <div class="setting-info">
+                <span class="setting-title">Start QuickPrint with Windows Boot</span>
+                <span class="setting-desc">Automatically launch Counter OS minimized in system tray on PC startup</span>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="cfgAutoLaunch" checked>
+                <span class="slider"></span>
+              </label>
+            </div>
+
+            <div class="setting-item">
+              <div class="setting-info">
+                <span class="setting-title">Sound Chime on New Order</span>
+                <span class="setting-desc">Play high-priority counter alert when customer uploads a document</span>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="cfgSoundAlert" checked>
+                <span class="slider"></span>
+              </label>
+            </div>
+
+            <div class="setting-item">
+              <div class="setting-info">
+                <span class="setting-title">Auto-Spool Paid Orders</span>
+                <span class="setting-desc">Immediately send UPI-paid orders to physical printer without clicking Print</span>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="cfgAutoPrintDefault">
+                <span class="slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <h3>Shop Identity & URLs</h3>
+            <div class="setting-item vertical">
+              <label>Shop Public Name</label>
+              <input type="text" class="text-input" id="cfgShopName" placeholder="e.g. Metro Xerox & Cyber Cafe">
+            </div>
+            <div class="setting-item vertical">
+              <label>Shop URL Slug (Kiosk link)</label>
+              <div class="input-slug">
+                <span>quickprint.in/kiosk/</span>
+                <input type="text" class="text-input" id="cfgShopSlug" placeholder="metro-xerox">
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- AUTHENTICATION MODAL / SCREEN (SHOWN WHEN NOT LOGGED IN) -->
+  <div class="auth-overlay" id="authOverlay">
+    <div class="auth-modal">
+      <div class="auth-header">
+        <div class="auth-brand-badge">QP</div>
+        <h2>QuickPrint Counter OS</h2>
+        <p class="auth-subtitle">Standalone Industrial Print Terminal for Print & Xerox Shops</p>
+      </div>
+
+      <div class="auth-tabs">
+        <button class="auth-tab active" id="tabLoginBtn">Sign In</button>
+        <button class="auth-tab" id="tabRegisterBtn">Register Shop</button>
+      </div>
+
+      <!-- LOGIN FORM -->
+      <form class="auth-form active" id="loginForm">
+        <div class="form-group">
+          <label for="loginEmail">Shop Owner Email</label>
+          <input type="email" id="loginEmail" placeholder="owner@printshop.com" required>
+        </div>
+        <div class="form-group">
+          <label for="loginPassword">Password</label>
+          <input type="password" id="loginPassword" placeholder="••••••••" required>
+        </div>
+        <div class="form-error" id="loginError"></div>
+        <button type="submit" class="btn btn-primary btn-block btn-lg" id="btnLoginSubmit">
+          Sign In to Counter OS
+        </button>
+      </form>
+
+      <!-- REGISTER FORM -->
+      <form class="auth-form" id="registerForm">
+        <div class="form-group">
+          <label for="regShopName">Shop Name</label>
+          <input type="text" id="regShopName" placeholder="e.g. Apex Xerox & Printing" required>
+        </div>
+        <div class="form-group">
+          <label for="regEmail">Owner Email</label>
+          <input type="email" id="regEmail" placeholder="apex@printshop.com" required>
+        </div>
+        <div class="form-group">
+          <label for="regPhone">Mobile Number</label>
+          <input type="tel" id="regPhone" placeholder="9876543210" required>
+        </div>
+        <div class="form-group">
+          <label for="regPassword">Password (Min 8 characters)</label>
+          <input type="password" id="regPassword" placeholder="••••••••" minlength="8" required>
+        </div>
+        <div class="form-group checkbox-group">
+          <label class="terms-label">
+            <input type="checkbox" id="regTerms" required>
+            <span>I accept the <a href="#" id="linkTerms">Terms of Service & EULA</a> for QuickPrint Counter OS</span>
+          </label>
+        </div>
+        <div class="form-error" id="regError"></div>
+        <button type="submit" class="btn btn-primary btn-block btn-lg" id="btnRegisterSubmit">
+          Create Account & Register Shop
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- COUNTER QR STANDEE MODAL -->
+  <div class="modal-overlay" id="qrModal">
+    <div class="modal-card qr-modal-card">
+      <div class="modal-header">
+        <h3>Customer Counter QR Code</h3>
+        <button class="modal-close" id="btnCloseQrModal">✕</button>
+      </div>
+      <div class="modal-body text-center">
+        <p class="qr-instruction">Display this on your counter or print it as a standee for customers to scan & upload documents.</p>
+        <div class="qr-display-box" id="qrContainer" style="background:#FFFFFF; padding:16px; border-radius:12px; border:2px solid var(--border-strong); display:inline-block; margin-bottom:14px;">
+          <img id="qrImageDisplay" src="https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=4&data=https://quickprint.in/kiosk/counter" alt="Customer Scan QR Code" style="width:220px; height:220px; display:block; border-radius:4px;">
+        </div>
+        <div class="qr-url-badge" id="qrUrlBadge" style="font-family:monospace; font-weight:700; color:var(--primary); font-size:13px; background:var(--bg-subtle); padding:8px 14px; border-radius:6px; border:1px solid var(--border-subtle); word-break:break-all;">
+          https://quickprint.in/kiosk/counter
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="btnCopyKioskUrl">📋 Copy Link</button>
+        <button class="btn btn-primary" id="btnPrintStandee">🖨️ Print Counter Standee</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- QUICK PDF PREVIEW MODAL -->
+  <div class="modal-overlay" id="previewModal">
+    <div class="modal-card preview-modal-card">
+      <div class="modal-header">
+        <h3 id="previewTitle">Document Preview — Token #A-101</h3>
+        <button class="modal-close" id="btnClosePreviewModal">✕</button>
+      </div>
+      <div class="modal-body preview-body" id="previewBody">
+        <iframe id="previewIframe" src="about:blank"></iframe>
+      </div>
+      <div class="modal-footer">
+        <div class="preview-specs" id="previewSpecs">12 Pages • B&W • Duplex</div>
+        <button class="btn btn-primary" id="btnPreviewPrintNow">🖨️ Print Now (Enter)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOAST NOTIFICATION CONTAINER -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- SOUND CHIME AUDIO -->
+  <audio id="orderChime" preload="auto">
+    <source src="data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YVoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/DCkF4uHjSh4/LKp281JDCU1/TOtH5GKS2Jz/PPu4NOLSmExvDLvYlTLieAwuvEuo1aMSd9vOfBvJBfNCd4ueW+uZVkOSlxt+O6tJpoPy1ssN20sJ5uQS5pq9mrq6FyRjFlpNChpKRuSjNfnseroaVvTDRdm8Gkoa1yUDdclbyhoK91UTlXjbqgoLF4VD1VibigoLJ6Vz9Tgbifn7J+W0BPhLecnrOCXkVJgLWanbSGYESBgLGXm7WJY0iBf6+VmLWLZEp+eKqSl7ePaU57dKaPkbqUbVNxapaMkb2Xb1ptZpGHi7+acGFkX4yDg8GcdmZfW4N/fL+ffGxkV316er+if3VoVWpsbLqigHdtUWZmZ7adh311V15cXX+thH97XlhVVF2oiISCeF9STktLgYSMg4F6WkxGQkF7g4iGhnhdS0I9PXt8hYeGfV5RPzg2OHp6gIGAfmJPMzAuNHh4gIGAfl5KKSclL3R4foCAf2BKJSEgKHN5fX+Af2BMIB8fJnJ4e39/f2BNHBsZJ3J2e359fmBKGxYUI3B0eXx8e11GExAQIG1ud3h2dVdBAAsIB2dpcXRxblQ7AAkFBlpnb21vbks1AAUDA1BfY2VkYEgrAAIAA0xWYF5bWUIlAAAAAEVNV1VSSiEAAAAAP0VLRUdEHgAAAAA2Oz08OTchAAAAAC8tLiwqJiAAAAAAJCQhHxsZFAAAAAAcGBUSCQYCAAAAAAA=" type="audio/wav">
+  </audio>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+{
+  "supabaseUrl": "https://iixcylrdqfdxfsldcygm.supabase.co",
+  "supabaseAnonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlpeGN5bHJkcWZkeGZzbGRjeWdtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk4NDI3ODksImV4cCI6MjEwNTQxODc4OX0.lavqpkI94x1yyIfUQdOJGeAG5jESdmVZ7qxsAE6FhMQ",
+  "shopId": "11111111-1111-1111-1111-111111111111",
+  "printerName": "",
+  "simulateIfNoPrinter": true,
+  "tempDir": "./spool_temp"
+}
