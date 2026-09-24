@@ -17,6 +17,7 @@ import {
   Printer,
   Sparkles,
   Layers,
+  AlertCircle,
 } from 'lucide-react';
 import { HeaderBar } from '@/components/HeaderBar';
 import { calculatePrintPrice, DEFAULT_PRICE_CONFIG } from '@/lib/price-calculator';
@@ -102,16 +103,30 @@ export default function KioskOptionsPage() {
     }
   }
 
+  const priceCfg = shop?.price_config || DEFAULT_PRICE_CONFIG;
+  const rates = priceCfg.rates || {};
+  const isOrdersPaused = priceCfg.is_accepting_orders === false || priceCfg.orders_paused === true;
+
+  const displayBwRate = duplex
+    ? (rates.bw_double != null ? rates.bw_double : priceCfg.rateBwDouble != null ? priceCfg.rateBwDouble : ((rates.bw_single || rates.bw || priceCfg.rateBwSingle || 2) * 1.5))
+    : (rates.bw_single != null ? rates.bw_single : rates.bw != null ? rates.bw : priceCfg.rateBwSingle != null ? priceCfg.rateBwSingle : 2);
+
+  const displayColorRate = duplex
+    ? (rates.color_double != null ? rates.color_double : priceCfg.rateColorDouble != null ? priceCfg.rateColorDouble : ((rates.color_single || rates.color || priceCfg.rateColorSingle || 10) * 1.8))
+    : (rates.color_single != null ? rates.color_single : rates.color != null ? rates.color : priceCfg.rateColorSingle != null ? priceCfg.rateColorSingle : 10);
+
   const calculation = calculatePrintPrice({
     pages: effectivePages,
     copies,
     colorMode,
     paperSize,
     duplex,
-    priceConfig: shop?.price_config || DEFAULT_PRICE_CONFIG,
+    priceConfig: priceCfg,
   });
 
   const handleContinue = () => {
+    if (isOrdersPaused) return;
+
     // Save configuration into sessionStorage for checkout step
     sessionStorage.setItem('qp_paper_size', paperSize);
     sessionStorage.setItem('qp_color_mode', colorMode);
@@ -157,6 +172,19 @@ export default function KioskOptionsPage() {
             <span className="text-[13px] text-[#1c1b1f]">Pay & Collect</span>
           </div>
         </div>
+
+        {/* Pause Orders Alert */}
+        {isOrdersPaused && (
+          <div className="p-4 bg-[#fff8e1] border border-[#f59e0b] rounded-lg text-[#92400e] text-[13px] flex items-start gap-3 shadow-xs">
+            <AlertCircle className="w-5 h-5 shrink-0 text-[#f59e0b] mt-0.5" />
+            <div className="flex flex-col">
+              <span className="font-bold text-[14px]">Counter Busy — Orders Temporarily Paused</span>
+              <span className="text-[12px] mt-0.5 leading-relaxed">
+                The shop operator has temporarily paused new orders to clear existing queue. Please wait a moment or speak to the counter operator.
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* Selected File Summary Banner */}
         <div className="bg-white rounded-lg p-3.5 border border-[#e6e5df] shadow-xs flex items-center justify-between">
@@ -275,9 +303,11 @@ export default function KioskOptionsPage() {
                 </span>
                 <div className="flex items-baseline gap-1 mt-0.5">
                   <span className="font-mono text-[16px] font-bold text-[#1c1b1f]">
-                    ₹2.00
+                    ₹{displayBwRate.toFixed(2)}
                   </span>
-                  <span className="text-[11px] text-[#6b6966]">/ page</span>
+                  <span className="text-[11px] text-[#6b6966]">
+                    {duplex ? '/ sheet' : '/ page'}
+                  </span>
                 </div>
               </div>
             </button>
@@ -312,9 +342,11 @@ export default function KioskOptionsPage() {
                 </span>
                 <div className="flex items-baseline gap-1 mt-0.5">
                   <span className="font-mono text-[16px] font-bold text-[#ff5a1f]">
-                    ₹10.00
+                    ₹{displayColorRate.toFixed(2)}
                   </span>
-                  <span className="text-[11px] text-[#6b6966]">/ page</span>
+                  <span className="text-[11px] text-[#6b6966]">
+                    {duplex ? '/ sheet' : '/ page'}
+                  </span>
                 </div>
               </div>
             </button>
@@ -499,10 +531,15 @@ export default function KioskOptionsPage() {
 
           <button
             type="button"
+            disabled={isOrdersPaused}
             onClick={handleContinue}
-            className="h-12 px-6 rounded bg-[#ff5a1f] hover:bg-[#e04b14] active:scale-95 text-white font-bold text-[14px] flex items-center gap-2 shadow-sm transition-all btn-tactile"
+            className={`h-12 px-6 rounded font-bold text-[14px] flex items-center gap-2 shadow-sm transition-all btn-tactile ${
+              isOrdersPaused
+                ? 'bg-[#94a3b8] text-white cursor-not-allowed opacity-80'
+                : 'bg-[#ff5a1f] hover:bg-[#e04b14] active:scale-95 text-white'
+            }`}
           >
-            <span>Proceed to Pay</span>
+            <span>{isOrdersPaused ? 'Orders Paused by Shop' : 'Proceed to Pay'}</span>
             <ArrowRight className="w-4 h-4" />
           </button>
         </div>

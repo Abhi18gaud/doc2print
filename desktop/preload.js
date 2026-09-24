@@ -20,12 +20,20 @@ contextBridge.exposeInMainWorld('quickprintApi', {
   printTestPage: (printerName) => ipcRenderer.invoke('printers-test-page', printerName),
   printJob: (jobId, options) => ipcRenderer.invoke('jobs-print', { jobId, options }),
 
-  // Real-time Jobs
+  // Real-time Jobs & Status
   getJobs: () => ipcRenderer.invoke('jobs-list'),
   updateJobStatus: (jobId, status) => ipcRenderer.invoke('jobs-update-status', { jobId, status }),
+  confirmCashPayment: (jobId) => ipcRenderer.invoke('jobs-confirm-cash', jobId),
   onJobReceived: (callback) => {
     ipcRenderer.on('job-received', (_event, job) => callback(job));
   },
+  onJobStatusUpdated: (callback) => {
+    ipcRenderer.on('job-status-updated', (_event, data) => callback(data));
+  },
+  onJobUpdated: (callback) => {
+    ipcRenderer.on('job-updated', (_event, job) => callback(job));
+  },
+  setOrderIntake: (isAccepting) => ipcRenderer.invoke('shop-set-order-intake', isAccepting),
 
   // Configuration & Preferences
   getConfig: () => ipcRenderer.invoke('settings-get-config'),

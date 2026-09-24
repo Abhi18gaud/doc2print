@@ -1,6 +1,9 @@
 const { app, BrowserWindow, Tray, Menu, Notification, nativeImage, ipcMain, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
+const https = require('https');
+const http = require('http');
 const { exec } = require('child_process');
 const WebSocket = require('ws');
 
@@ -286,6 +289,30 @@ function createTray() {
   });
 }
 
+// Download remote file helper for physical spooler
+function downloadRemoteFile(url, destPath) {
+  return new Promise((resolve, reject) => {
+    const file = fs.createWriteStream(destPath);
+    const client = url.startsWith('https') ? https : http;
+
+    client.get(url, (response) => {
+      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+        downloadRemoteFile(response.headers.location, destPath).then(resolve).catch(reject);
+        return;
+      }
+      if (response.statusCode !== 200) {
+        reject(new Error(`Failed to download file from cloud: HTTP ${response.statusCode}`));
+        return;
+      }
+      response.pipe(file);
+      file.on('finish', () => file.close(resolve));
+    }).on('error', (err) => {
+      fs.unlink(destPath, () => {});
+      reject(err);
+    });
+  });
+}
+
 // Background Realtime Agent
 function setupRealtimeJobs(shopId) {
   const client = getSupabase();
@@ -323,6 +350,22 @@ function setupRealtimeJobs(shopId) {
               title: `New Order Token #${job.token_number || '001'}`,
               body: `${displayName} • ₹${displayPrice} (${(job.payment_status || 'PENDING').toUpperCase()})`,
             }).show();
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'jobs',
+          filter: `shop_id=eq.${shopId}`,
+        },
+        (payload) => {
+          const job = payload.new;
+          console.log('[AGENT] Realtime job update:', job.token_number, job.payment_status, job.print_status);
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('job-updated', job);
           }
         }
       )
@@ -453,16 +496,29 @@ function registerIpcHandlers() {
         writeSavedSession(saved);
       }
 
-      if (saved.shop) {
-        saved.shop.slug = saved.shop.qr_code_slug || saved.shop.slug || 'counter';
-        saved.shop.qr_code_slug = saved.shop.slug;
+      let freshShop = saved.shop;
+      let subscription = null;
+      if (saved.shop?.id) {
+        try {
+          const { data: s } = await client.from('shops').select('*').eq('id', saved.shop.id).single();
+          if (s) freshShop = s;
+          const { data: sub } = await client.from('subscriptions').select('*').eq('shop_id', saved.shop.id).maybeSingle();
+          subscription = sub;
+        } catch (e) {}
+      }
+
+      if (freshShop) {
+        freshShop.slug = freshShop.qr_code_slug || freshShop.slug || 'counter';
+        freshShop.qr_code_slug = freshShop.slug;
+        saved.shop = freshShop;
+        writeSavedSession(saved);
       }
 
       if (saved.shop?.id) {
         setupRealtimeJobs(saved.shop.id);
       }
 
-      return { user: data.user, shop: saved.shop };
+      return { user: data.user, shop: freshShop || saved.shop, subscription };
     } catch (e) {
       console.error('Session verify error:', e);
       return null;
@@ -515,6 +571,12 @@ function registerIpcHandlers() {
         shop.qr_code_slug = shop.slug;
       }
 
+      let subscription = null;
+      try {
+        const { data: sub } = await client.from('subscriptions').select('*').eq('shop_id', shop.id).maybeSingle();
+        subscription = sub;
+      } catch (subErr) { }
+
       // Persist session tokens
       const sessionRecord = {
         tokens: {
@@ -532,7 +594,7 @@ function registerIpcHandlers() {
 
       setupRealtimeJobs(shop.id);
 
-      return { success: true, user: data.user, shop };
+      return { success: true, user: data.user, shop, subscription };
     } catch (err) {
       console.error('[AUTH] Uncaught login exception:', err);
       return { success: false, error: err.message };
@@ -642,23 +704,145 @@ function registerIpcHandlers() {
     return { success: true, simulated: true };
   });
 
-  // Jobs: Print Job
-  ipcMain.handle('jobs-print', async (_e, { jobId, options }) => {
-    console.log('[SPOOLER] Printing job:', jobId, options);
+  // Jobs: Print Job (Direct Physical Spooler Pipeline)
+  ipcMain.handle('jobs-print', async (_e, { jobId, options = {} }) => {
+    console.log('[SPOOLER] Processing print job request:', jobId, options);
     const client = getSupabase();
-    if (client && jobId && !jobId.startsWith('demo-')) {
-      try {
-        await client
-          .from('jobs')
-          .update({
-            print_status: 'completed',
-            completed_at: new Date().toISOString(),
-          })
-          .eq('id', jobId);
-      } catch (e) {
-        console.warn('Failed to update DB print status:', e.message);
-      }
+    if (!client || !jobId) return { success: false, error: 'Database client or Job ID missing' };
+
+    // Fetch full job record
+    const { data: job, error: fetchErr } = await client.from('jobs').select('*').eq('id', jobId).single();
+    if (fetchErr || !job) {
+      return { success: false, error: fetchErr?.message || 'Job not found in database' };
     }
+
+    // Step 1: Update status to 'printing'
+    await client.from('jobs').update({ print_status: 'printing' }).eq('id', jobId);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('job-status-updated', { jobId, status: 'printing' });
+    }
+
+    try {
+      const printerName = options.printerName || appConfig.defaultPrinter || 'Microsoft Print to PDF';
+      const fileUrl = options.fileUrl || job.file_url;
+      const copies = Number(options.copies || job.copies || 1);
+      const paperSize = (options.paperSize || job.paper_size || 'A4').toUpperCase();
+      const duplex = options.duplex ?? job.duplex ?? false;
+
+      if (!fileUrl) {
+        throw new Error('No printable document file URL associated with this order');
+      }
+
+      // Download file to temp spool directory
+      const tempDir = path.join(os.tmpdir(), 'quickprint_spool');
+      if (!fs.existsSync(tempDir)) {
+        fs.mkdirSync(tempDir, { recursive: true });
+      }
+
+      const ext = (job.file_name || 'doc').split('.').pop() || 'pdf';
+      const tempFilePath = path.join(tempDir, `job_${job.token_number || Date.now()}_${Date.now()}.${ext}`);
+
+      await downloadRemoteFile(fileUrl, tempFilePath);
+      console.log(`[SPOOLER] Spool file downloaded: ${tempFilePath}`);
+
+      // Spool to Windows printer via pdf-to-printer
+      let ptp = null;
+      try {
+        ptp = require('pdf-to-printer');
+      } catch (e) {
+        console.warn('pdf-to-printer load error:', e.message);
+      }
+
+      if (ptp && process.platform === 'win32') {
+        const ptpOpts = {
+          printer: printerName,
+          copies,
+        };
+        if (paperSize) ptpOpts.paperSize = paperSize;
+        if (duplex) ptpOpts.side = 'duplex';
+
+        console.log('[SPOOLER] Sending to physical printer via pdf-to-printer:', ptpOpts);
+        await ptp.print(tempFilePath, ptpOpts);
+        console.log('[SPOOLER] Spooler accepted job successfully.');
+      } else if (process.platform === 'win32') {
+        const psCmd = `powershell -NoProfile -Command "Start-Process -FilePath '${tempFilePath.replace(/'/g, "''")}' -Verb PrintTo -ArgumentList '\"${printerName}\"' -PassThru | Wait-Process -Timeout 15"`;
+        await new Promise((resolve) => {
+          exec(psCmd, (err) => {
+            if (err) console.warn('Native PrintTo note:', err.message);
+            resolve();
+          });
+        });
+      }
+
+      // Clean up temp file safely
+      setTimeout(() => {
+        try { fs.unlinkSync(tempFilePath); } catch (e) {}
+      }, 5000);
+
+      // Step 2: Mark print completed in database
+      const completedAt = new Date().toISOString();
+      await client
+        .from('jobs')
+        .update({
+          print_status: 'completed',
+          completed_at: completedAt,
+        })
+        .eq('id', jobId);
+
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('job-status-updated', { jobId, status: 'completed', completedAt });
+      }
+
+      return { success: true };
+    } catch (err) {
+      console.error('[SPOOLER] Physical print spool error:', err.message);
+      await client
+        .from('jobs')
+        .update({
+          print_status: 'failed',
+          failure_reason: err.message,
+        })
+        .eq('id', jobId);
+
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('job-status-updated', { jobId, status: 'failed', error: err.message });
+      }
+
+      return { success: false, error: err.message };
+    }
+  });
+
+  // Jobs: Confirm Cash Payment & Release
+  ipcMain.handle('jobs-confirm-cash', async (_e, jobId) => {
+    const client = getSupabase();
+    if (!client || !jobId) return { success: false, error: 'Missing client or jobId' };
+
+    const now = new Date().toISOString();
+    const { data: job, error: fetchErr } = await client.from('jobs').select('*').eq('id', jobId).single();
+    if (fetchErr || !job) return { success: false, error: 'Job not found' };
+
+    const { error: updateErr } = await client
+      .from('jobs')
+      .update({
+        payment_status: 'paid',
+        print_status: 'queued',
+        queued_at: now,
+      })
+      .eq('id', jobId);
+
+    if (updateErr) return { success: false, error: updateErr.message };
+
+    try {
+      await client.from('payments').insert({
+        job_id: jobId,
+        gateway_payment_id: `CASH_${Date.now()}`,
+        gateway_order_id: `ORDER_${job.token_number}`,
+        amount: job.price || 0,
+        status: 'PAID_CASH',
+        raw_response: { mode: 'cash_at_counter', confirmed_at: now },
+      });
+    } catch (e) {}
+
     return { success: true };
   });
 
@@ -701,6 +885,37 @@ function registerIpcHandlers() {
     return { success: true };
   });
 
+  // Shop: Toggle Pause / Resume Orders (Live intake)
+  ipcMain.handle('shop-set-order-intake', async (_e, isAccepting) => {
+    const client = getSupabase();
+    const saved = readSavedSession();
+    const shopId = saved?.shop?.id || appConfig.shopId;
+
+    if (client && shopId) {
+      try {
+        const { data: existingShop } = await client.from('shops').select('price_config').eq('id', shopId).single();
+        const prevConfig = existingShop?.price_config || {};
+        const updatedConfig = {
+          ...prevConfig,
+          is_accepting_orders: isAccepting,
+          orders_paused: !isAccepting,
+        };
+
+        await client.from('shops').update({ price_config: updatedConfig }).eq('id', shopId);
+
+        if (saved?.shop) {
+          saved.shop.price_config = updatedConfig;
+          writeSavedSession(saved);
+        }
+        return { success: true, isAccepting };
+      } catch (err) {
+        console.warn('Failed to update shop order intake:', err.message);
+        return { success: false, error: err.message };
+      }
+    }
+    return { success: false, error: 'Shop not configured' };
+  });
+
   // Settings: Update Pricing
   ipcMain.handle('settings-update-pricing', async (_e, pricing) => {
     const client = getSupabase();
@@ -709,28 +924,49 @@ function registerIpcHandlers() {
 
     if (client && shopId) {
       try {
+        const { data: existingShop } = await client.from('shops').select('price_config').eq('id', shopId).single();
+        const prevConfig = existingShop?.price_config || {};
+
+        const singleBw = Number(pricing.rateBwSingle || 2.0);
+        const doubleBw = Number(pricing.rateBwDouble || 3.0);
+        const singleColor = Number(pricing.rateColorSingle || 10.0);
+        const doubleColor = Number(pricing.rateColorDouble || 18.0);
+
         const priceConfig = {
+          ...prevConfig,
           currency: 'INR',
           currencySymbol: '₹',
           rates: {
-            bw: pricing.rateBwSingle || 2.0,
-            color: pricing.rateColorSingle || 10.0,
+            bw: singleBw,
+            bw_single: singleBw,
+            bw_double: doubleBw,
+            color: singleColor,
+            color_single: singleColor,
+            color_double: doubleColor,
           },
+          rateBwSingle: singleBw,
+          rateBwDouble: doubleBw,
+          rateColorSingle: singleColor,
+          rateColorDouble: doubleColor,
+          rateSpiralBinding: Number(pricing.rateSpiralBinding || 30.0),
+          rateStapling: Number(pricing.rateStapling || 2.0),
           paperSizes: {
             a4: { name: 'A4', extra: 0.0, description: 'Standard 75 GSM' },
             a3: { name: 'A3', extra: 4.0, description: 'Large Sheet' },
             passport: { name: 'Passport (8×)', extra: 30.0, description: 'Glossy Sheet' },
             custom: { name: 'Custom / Legal', extra: 2.0, description: 'Legal/Bond' },
           },
-          duplexDiscount: 0,
-          taxPercentage: 0,
-          ...pricing,
         };
 
         await client
           .from('shops')
           .update({ price_config: priceConfig })
           .eq('id', shopId);
+
+        if (saved?.shop) {
+          saved.shop.price_config = priceConfig;
+          writeSavedSession(saved);
+        }
       } catch (e) {
         console.warn('Failed to update price_config in DB:', e.message);
       }
@@ -743,7 +979,7 @@ function registerIpcHandlers() {
     return { ...appConfig };
   });
 
-  // Settings: Save Preferences (Shopkeeper preferences only — domain is protected)
+  // Settings: Save Preferences
   ipcMain.handle('settings-save', async (_e, settings) => {
     if (typeof settings.autoLaunch === 'boolean') appConfig.autoLaunch = settings.autoLaunch;
     if (typeof settings.soundAlert === 'boolean') appConfig.soundAlert = settings.soundAlert;
@@ -755,6 +991,38 @@ function registerIpcHandlers() {
 
     if (typeof settings.autoLaunch === 'boolean') {
       updateAutoLaunch(settings.autoLaunch);
+    }
+
+    // Sync payment methods & shop attributes to Supabase
+    const client = getSupabase();
+    const saved = readSavedSession();
+    const shopId = saved?.shop?.id || appConfig.shopId;
+
+    if (client && shopId) {
+      try {
+        const { data: existingShop } = await client.from('shops').select('price_config').eq('id', shopId).single();
+        const prevConfig = existingShop?.price_config || {};
+        const updatedConfig = { ...prevConfig };
+
+        if (settings.paymentMethods) {
+          updatedConfig.payment_methods = settings.paymentMethods;
+        }
+
+        const shopUpdate = { price_config: updatedConfig };
+        if (settings.shopName) shopUpdate.name = settings.shopName;
+        if (settings.shopSlug) shopUpdate.qr_code_slug = settings.shopSlug;
+
+        await client.from('shops').update(shopUpdate).eq('id', shopId);
+
+        if (saved?.shop) {
+          saved.shop.name = settings.shopName || saved.shop.name;
+          saved.shop.qr_code_slug = settings.shopSlug || saved.shop.qr_code_slug;
+          saved.shop.price_config = updatedConfig;
+          writeSavedSession(saved);
+        }
+      } catch (err) {
+        console.warn('Could not sync settings to Supabase:', err.message);
+      }
     }
 
     return { success: true, config: { ...appConfig } };

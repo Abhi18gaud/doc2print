@@ -169,6 +169,40 @@ export default function KioskUploadPage() {
     );
   }
 
+  const isOrdersPaused = shop?.price_config?.is_accepting_orders === false || shop?.price_config?.orders_paused === true;
+
+  if (!loadingShop && shop && isOrdersPaused) {
+    return (
+      <div className="min-h-screen bg-[#fafaf7] flex flex-col items-center justify-center p-4">
+        <TicketCard className="max-w-md w-full p-6 text-center">
+          <div className="w-14 h-14 rounded-full bg-[#fff8e1] border border-[#f59e0b]/30 flex items-center justify-center text-[#d97706] mx-auto mb-3">
+            <AlertCircle className="w-7 h-7" />
+          </div>
+          <span className="text-[11px] font-mono font-bold tracking-widest text-[#6b6966] uppercase">
+            LIVE COUNTER STATUS
+          </span>
+          <h2 className="text-[20px] font-bold text-[#1c1b1f] mt-1">{shop.name}</h2>
+          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#fef3c7] text-[#92400e] text-[12px] font-semibold my-3">
+            <span className="w-2 h-2 rounded-full bg-[#f59e0b] animate-pulse" />
+            Orders Temporarily Paused
+          </div>
+          <p className="text-[13px] text-[#6b6966] mb-6 leading-relaxed">
+            The counter operator is currently clearing the print queue. Intake of new orders is temporarily paused. Please check back in a couple of minutes or ask at the counter.
+          </p>
+          <div className="flex flex-col gap-2">
+            <button
+              onClick={() => window.location.reload()}
+              className="w-full h-11 rounded bg-[#ff5a1f] hover:bg-[#e04b14] text-white font-bold text-[14px] btn-tactile flex items-center justify-center gap-2"
+            >
+              <RefreshCw className="w-4 h-4" />
+              <span>Check Counter Status</span>
+            </button>
+          </div>
+        </TicketCard>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#fafaf7] flex flex-col justify-between pb-28">
       {/* Kiosk Header */}

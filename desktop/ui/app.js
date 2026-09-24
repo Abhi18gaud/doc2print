@@ -106,6 +106,11 @@
   const cfgShopName = document.getElementById('cfgShopName');
   const cfgShopSlug = document.getElementById('cfgShopSlug');
   const cfgDomainPrefix = document.getElementById('cfgDomainPrefix');
+  const cfgEnableUpi = document.getElementById('cfgEnableUpi');
+  const cfgEnableCash = document.getElementById('cfgEnableCash');
+  const cfgPlanTitle = document.getElementById('cfgPlanTitle');
+  const cfgPlanDesc = document.getElementById('cfgPlanDesc');
+  const cfgPlanBadge = document.getElementById('cfgPlanBadge');
   const btnSaveSettings = document.getElementById('btnSaveSettings');
 
   let currentAppUrl = 'https://doc2print.vercel.app';
@@ -316,17 +321,71 @@
 
       await renderShopQrAndUrls();
 
-      // Pricing values (support both price_config schema and flat rates)
-      const pricing = currentShop.price_config || currentShop.settings;
-      if (pricing) {
-        const rates = pricing.rates || {};
-        rateBwSingle.value = rates.bw || pricing.rateBwSingle || 2;
-        rateBwDouble.value = pricing.rateBwDouble || (rates.bw ? rates.bw * 1.5 : 3);
-        rateColorSingle.value = rates.color || pricing.rateColorSingle || 10;
-        rateColorDouble.value = pricing.rateColorDouble || (rates.color ? rates.color * 1.8 : 18);
-        rateSpiralBinding.value = pricing.rateSpiralBinding || 30;
-        rateStapling.value = pricing.rateStapling || 2;
+      // Populate subscription info (Separation of Shop Subscription vs Customer Orders)
+      if (session.subscription) {
+        const sub = session.subscription;
+        const planName = (sub.plan || 'trial').toUpperCase();
+        if (cfgPlanTitle) cfgPlanTitle.textContent = `${planName} LICENSE`;
+        if (cfgPlanBadge) {
+          cfgPlanBadge.textContent = (sub.status || 'ACTIVE').toUpperCase();
+          cfgPlanBadge.className = `badge-chip ${sub.status === 'active' || sub.status === 'trial' ? 'green' : 'red'}`;
+        }
+        if (cfgPlanDesc) {
+          if (sub.status === 'trial' && sub.trial_ends_at) {
+            const daysLeft = Math.max(0, Math.ceil((new Date(sub.trial_ends_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
+            cfgPlanDesc.textContent = `14-Day Free Trial • ${daysLeft} days remaining • Full Windows Spooler Access`;
+          } else {
+            cfgPlanDesc.textContent = `Active QuickPrint Counter OS License • Status: ${sub.status || 'active'}`;
+          }
+        }
       }
+
+      // Pricing values (support both price_config schema and flat rates)
+      const pricing = currentShop.price_config || currentShop.settings || {};
+      const rates = pricing.rates || {};
+      rateBwSingle.value = rates.bw_single || rates.bw || pricing.rateBwSingle || 2;
+      rateBwDouble.value = rates.bw_double || pricing.rateBwDouble || (rates.bw ? rates.bw * 1.5 : 3);
+      rateColorSingle.value = rates.color_single || rates.color || pricing.rateColorSingle || 10;
+      rateColorDouble.value = rates.color_double || pricing.rateColorDouble || (rates.color ? rates.color * 1.8 : 18);
+      rateSpiralBinding.value = pricing.rateSpiralBinding || 30;
+      rateStapling.value = pricing.rateStapling || 2;
+
+      // Payment methods configuration
+      const payMethods = pricing.payment_methods || { enable_upi: true, enable_cash: true };
+      if (cfgEnableUpi) cfgEnableUpi.checked = payMethods.enable_upi !== false;
+      if (cfgEnableCash) cfgEnableCash.checked = payMethods.enable_cash !== false;
+
+      // Live Shop Availability: Accepting Orders vs Paused
+      ordersPaused = pricing.is_accepting_orders === false || pricing.orders_paused === true;
+      if (ordersPaused) {
+        shopStatusIndicator.classList.add('paused');
+        shopStatusText.textContent = 'Orders Paused (Counter Busy)';
+        btnPauseOrdersText.textContent = '▶️ Resume Orders';
+      } else {
+        shopStatusIndicator.classList.remove('paused');
+        shopStatusText.textContent = 'Live — Accepting Orders';
+        btnPauseOrdersText.textContent = '⏸️ Pause Orders';
+      }
+
+      // Read local preferences (auto-print, sound, auto-launch)
+      try {
+        const localCfg = await window.quickprintApi.getConfig();
+        if (localCfg) {
+          if (localCfg.autoPrintDefault !== undefined) {
+            autoPrintEnabled = Boolean(localCfg.autoPrintDefault);
+            if (cfgAutoPrintDefault) cfgAutoPrintDefault.checked = autoPrintEnabled;
+          }
+          if (localCfg.soundAlert !== undefined && cfgSoundAlert) {
+            cfgSoundAlert.checked = Boolean(localCfg.soundAlert);
+          }
+          if (localCfg.autoLaunch !== undefined && cfgAutoLaunch) {
+            cfgAutoLaunch.checked = Boolean(localCfg.autoLaunch);
+          }
+        }
+      } catch (e) {}
+
+      btnAutoPrintState.classList.toggle('active', autoPrintEnabled);
+      btnAutoPrintState.textContent = autoPrintEnabled ? 'ON' : 'OFF';
 
       // Scan printers and load initial jobs
       await scanPrinters();
@@ -482,17 +541,25 @@
     }
   }
 
-  // Auto-print mode toggle
-  btnAutoPrintState.addEventListener('click', () => {
+  // Auto-print mode toggle (Persisted across restarts)
+  btnAutoPrintState.addEventListener('click', async () => {
     autoPrintEnabled = !autoPrintEnabled;
     btnAutoPrintState.classList.toggle('active', autoPrintEnabled);
     btnAutoPrintState.textContent = autoPrintEnabled ? 'ON' : 'OFF';
+    if (cfgAutoPrintDefault) cfgAutoPrintDefault.checked = autoPrintEnabled;
+    try {
+      await window.quickprintApi.saveSettings({ autoPrintDefault: autoPrintEnabled });
+    } catch (e) {
+      console.warn('Could not persist auto-print preference:', e);
+    }
     showToast(`Auto-Print Mode is now ${autoPrintEnabled ? 'ENABLED' : 'DISABLED'}`, 'info');
   });
 
-  // Pause orders toggle
-  btnPauseOrders.addEventListener('click', () => {
+  // Pause orders toggle (Authoritative Cloud Sync to shops.price_config.is_accepting_orders)
+  btnPauseOrders.addEventListener('click', async () => {
     ordersPaused = !ordersPaused;
+    const isAccepting = !ordersPaused;
+
     if (ordersPaused) {
       shopStatusIndicator.classList.add('paused');
       shopStatusText.textContent = 'Orders Paused (Counter Busy)';
@@ -502,7 +569,17 @@
       shopStatusIndicator.classList.remove('paused');
       shopStatusText.textContent = 'Live — Accepting Orders';
       btnPauseOrdersText.textContent = '⏸️ Pause Orders';
-      showToast('Kiosk intake is LIVE.', 'success');
+      showToast('Kiosk intake is LIVE. Accepting orders.', 'success');
+    }
+
+    try {
+      const res = await window.quickprintApi.setOrderIntake(isAccepting);
+      if (!res?.success) {
+        showToast(`Could not sync intake status: ${res?.error || 'Unknown error'}`, 'warning');
+      }
+    } catch (err) {
+      console.error('Failed to sync order intake to cloud:', err);
+      showToast('Error syncing shop status to cloud backend.', 'danger');
     }
   });
 
@@ -620,16 +697,19 @@
           <div class="order-actions">
             ${
               isCompleted
-                ? '<button class="btn btn-secondary btn-sm" disabled>✓ Printed</button>'
-                : `<button class="btn btn-primary btn-sm btn-print-job" data-id="${job.id}">
-                     ${isPrinting ? '⏳ Spooling...' : '🖨️ Print Now'}
-                   </button>`
+                ? `<span class="badge-chip green" style="padding: 6px 12px; font-weight: 700; border-radius: 6px;">✓ PRINT COMPLETED</span>
+                   <button class="btn btn-secondary btn-sm btn-print-job" data-id="${job.id}" title="Send duplicate to printer">🔄 Reprint</button>`
+                : isPrinting
+                ? `<button class="btn btn-primary btn-sm" disabled style="opacity: 0.85;">⏳ Printing to Spooler...</button>`
+                : job.status === 'failed'
+                ? `<span class="badge-chip red" style="padding: 6px 12px; font-weight: 700; border-radius: 6px;" title="${job.failure_reason || 'Print failure'}">⚠️ PRINT FAILED</span>
+                   <button class="btn btn-primary btn-sm btn-print-job" data-id="${job.id}">🔄 Retry Print</button>`
+                : !isPaid
+                ? `<button class="btn btn-primary btn-sm btn-confirm-cash" data-id="${job.id}">💵 Cash Paid & Print</button>`
+                : `<button class="btn btn-primary btn-sm btn-print-job" data-id="${job.id}">🖨️ Print Now</button>`
             }
             <button class="btn btn-secondary btn-sm btn-preview-job" data-id="${job.id}">
               👁️ Preview
-            </button>
-            <button class="btn btn-secondary btn-sm btn-done-job" data-id="${job.id}" title="Mark as Completed">
-              ✓ Done
             </button>
           </div>
         </div>
@@ -638,7 +718,7 @@
       queueCardsList.appendChild(card);
     });
 
-    // Bind action buttons
+    // Bind action buttons: Print / Reprint / Retry
     document.querySelectorAll('.btn-print-job').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         const id = e.currentTarget.getAttribute('data-id');
@@ -647,6 +727,35 @@
       });
     });
 
+    // Bind action buttons: Confirm Cash & Print
+    document.querySelectorAll('.btn-confirm-cash').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        const job = activeJobs.find((j) => j.id === id);
+        if (!job) return;
+        btn.disabled = true;
+        btn.textContent = 'Recording...';
+        try {
+          showToast(`Recording cash payment for Token ${job.token_number}...`, 'info');
+          const res = await window.quickprintApi.confirmCashPayment(id);
+          if (res?.success) {
+            job.payment_status = 'paid';
+            showToast(`Cash payment verified for Token ${job.token_number}!`, 'success');
+            await executePrint(job);
+          } else {
+            showToast(`Could not confirm cash: ${res?.error || 'Database error'}`, 'danger');
+            btn.disabled = false;
+            btn.textContent = '💵 Cash Paid & Print';
+          }
+        } catch (err) {
+          showToast(`Cash payment error: ${err.message}`, 'danger');
+          btn.disabled = false;
+          btn.textContent = '💵 Cash Paid & Print';
+        }
+      });
+    });
+
+    // Bind action buttons: Preview
     document.querySelectorAll('.btn-preview-job').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         const id = e.currentTarget.getAttribute('data-id');
@@ -654,19 +763,14 @@
         if (job) openPreview(job);
       });
     });
-
-    document.querySelectorAll('.btn-done-job').forEach((btn) => {
-      btn.addEventListener('click', async (e) => {
-        const id = e.currentTarget.getAttribute('data-id');
-        await markJobCompleted(id);
-      });
-    });
   }
 
-  // Execute Real Print
+  // Execute Real Print via physical spooler pipeline
   async function executePrint(job) {
     const card = document.getElementById(`job-card-${job.id}`);
     if (card) card.classList.add('printing');
+    job.status = 'printing';
+    renderQueue();
 
     showToast(`Sending Token ${job.token_number || ''} to ${defaultPrinterName}...`, 'info');
 
@@ -680,31 +784,23 @@
       });
 
       if (res.success) {
-        showToast(`Token ${job.token_number || ''} spooled successfully!`, 'success');
+        showToast(`Token ${job.token_number || ''} spooled & verified completed!`, 'success');
         job.status = 'completed';
         renderQueue();
         updateFinancials();
       } else {
+        job.status = 'failed';
+        job.failure_reason = res.error || 'Spooler error';
+        renderQueue();
         showToast(`Spool error: ${res.error || 'Failed to print'}`, 'danger');
       }
     } catch (e) {
+      job.status = 'failed';
+      job.failure_reason = e.message;
+      renderQueue();
       showToast(`Printer driver error: ${e.message}`, 'danger');
     } finally {
       if (card) card.classList.remove('printing');
-    }
-  }
-
-  // Mark Completed
-  async function markJobCompleted(jobId) {
-    try {
-      await window.quickprintApi.updateJobStatus(jobId, 'completed');
-      const job = activeJobs.find((j) => j.id === jobId);
-      if (job) job.status = 'completed';
-      renderQueue();
-      updateFinancials();
-      showToast('Marked order as completed.', 'info');
-    } catch (e) {
-      showToast('Failed to update job status.', 'danger');
     }
   }
 
@@ -716,13 +812,42 @@
     previewSpecs.textContent = `${job.page_count || 1} Pages • ${job.copies || 1} Copies • ${job.color_mode || 'B&W'} • ${job.duplex ? 'Duplex' : 'Single'}`;
 
     if (job.file_url) {
-      previewIframe.src = job.file_url;
+      previewIframe.srcdoc = `
+        <body style="font-family:system-ui,-apple-system,sans-serif; display:flex; align-items:center; justify-content:center; height:100vh; margin:0; background:#f8fafc; color:#64748b;">
+          <div style="text-align:center;">
+            <p>⏳ Loading document preview...</p>
+          </div>
+        </body>
+      `;
+      // Verify document availability (retention policy / purge handling)
+      fetch(job.file_url, { method: 'HEAD' })
+        .then((resp) => {
+          if (resp.ok) {
+            previewIframe.removeAttribute('srcdoc');
+            previewIframe.src = job.file_url;
+          } else {
+            previewIframe.srcdoc = `
+              <body style="font-family:system-ui,-apple-system,sans-serif; display:flex; align-items:center; justify-content:center; height:100vh; margin:0; background:#f8fafc;">
+                <div style="text-align:center; padding: 24px; max-width: 400px; border-radius: 12px; background: white; box-shadow: 0 4px 16px rgba(0,0,0,0.06);">
+                  <div style="font-size: 40px; margin-bottom: 12px;">🔒</div>
+                  <h3 style="margin: 0 0 8px; color: #0f172a; font-weight: 700;">Document no longer available</h3>
+                  <p style="font-size: 13px; color: #64748b; line-height: 1.5; margin: 0;">This customer document was securely purged in accordance with data privacy and retention policies.</p>
+                </div>
+              </body>
+            `;
+          }
+        })
+        .catch(() => {
+          previewIframe.removeAttribute('srcdoc');
+          previewIframe.src = job.file_url;
+        });
     } else {
       previewIframe.srcdoc = `
-        <body style="font-family:sans-serif; display:flex; align-items:center; justify-content:center; height:100vh; margin:0; background:#FAFAFA;">
-          <div style="text-align:center;">
-            <h2>Preview Document Ready</h2>
-            <p style="color:#666;">Token: ${tokenDisplay} | File: ${job.file_name || 'document.pdf'}</p>
+        <body style="font-family:system-ui,-apple-system,sans-serif; display:flex; align-items:center; justify-content:center; height:100vh; margin:0; background:#f8fafc;">
+          <div style="text-align:center; padding: 24px; max-width: 400px; border-radius: 12px; background: white; box-shadow: 0 4px 16px rgba(0,0,0,0.06);">
+            <div style="font-size: 40px; margin-bottom: 12px;">📄</div>
+            <h3 style="margin: 0 0 8px; color: #0f172a; font-weight: 700;">Document Pending Upload</h3>
+            <p style="font-size: 13px; color: #64748b; line-height: 1.5; margin: 0;">Token: ${tokenDisplay} | File: ${job.file_name || 'document.pdf'}</p>
           </div>
         </body>
       `;
@@ -885,17 +1010,34 @@
 
   // --- SETTINGS SAVE ---
   btnSaveSettings.addEventListener('click', async () => {
+    const upiOn = cfgEnableUpi ? cfgEnableUpi.checked : true;
+    const cashOn = cfgEnableCash ? cfgEnableCash.checked : true;
+
+    if (!upiOn && !cashOn) {
+      alert('⚠️ Configuration Warning:\n\nNo customer payment method is enabled! Enable at least one payment method (UPI or Cash) to accept orders.');
+      showToast('Enable at least one payment method to accept orders!', 'danger');
+      return;
+    }
+
     const settings = {
-      autoLaunch: cfgAutoLaunch.checked,
-      soundAlert: cfgSoundAlert.checked,
-      autoPrintDefault: cfgAutoPrintDefault.checked,
-      shopName: cfgShopName.value.trim(),
-      shopSlug: cfgShopSlug.value.trim(),
+      autoLaunch: cfgAutoLaunch ? cfgAutoLaunch.checked : false,
+      soundAlert: cfgSoundAlert ? cfgSoundAlert.checked : true,
+      autoPrintDefault: cfgAutoPrintDefault ? cfgAutoPrintDefault.checked : false,
+      shopName: cfgShopName ? cfgShopName.value.trim() : currentShop.name,
+      shopSlug: cfgShopSlug ? cfgShopSlug.value.trim() : (currentShop.slug || 'counter'),
+      paymentMethods: {
+        enable_upi: upiOn,
+        enable_cash: cashOn,
+      },
     };
+
+    autoPrintEnabled = settings.autoPrintDefault;
+    btnAutoPrintState.classList.toggle('active', autoPrintEnabled);
+    btnAutoPrintState.textContent = autoPrintEnabled ? 'ON' : 'OFF';
 
     try {
       await window.quickprintApi.saveSettings(settings);
-      showToast('Settings saved successfully.', 'success');
+      showToast('Preferences & Payment Methods saved to cloud!', 'success');
       shopNameDisplay.textContent = settings.shopName || currentShop.name;
       await renderShopQrAndUrls();
     } catch (e) {
@@ -1081,6 +1223,39 @@
       if (autoPrintEnabled && normalized.payment_status === 'paid') {
         executePrint(normalized);
       }
+    });
+  }
+
+  // Real-time job status updates (Printing -> Spool Completed / Failed)
+  if (window.quickprintApi?.onJobStatusUpdated) {
+    window.quickprintApi.onJobStatusUpdated((data) => {
+      const { jobId, status, error } = data;
+      const job = activeJobs.find((j) => j.id === jobId);
+      if (job) {
+        if (status === 'completed') job.status = 'completed';
+        else if (status === 'printing') job.status = 'printing';
+        else if (status === 'failed') {
+          job.status = 'failed';
+          job.failure_reason = error;
+        }
+        renderQueue();
+        updateFinancials();
+      }
+    });
+  }
+
+  // Real-time order update listener (e.g. payment confirmed, settings updated)
+  if (window.quickprintApi?.onJobUpdated) {
+    window.quickprintApi.onJobUpdated((updatedRaw) => {
+      const updated = normalizeJob(updatedRaw);
+      const idx = activeJobs.findIndex((j) => j.id === updated.id);
+      if (idx >= 0) {
+        activeJobs[idx] = { ...activeJobs[idx], ...updated };
+      } else {
+        activeJobs.unshift(updated);
+      }
+      renderQueue();
+      updateFinancials();
     });
   }
 

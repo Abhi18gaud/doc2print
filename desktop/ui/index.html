@@ -519,6 +519,43 @@
           </div>
 
           <div class="settings-group">
+            <h3>Customer Payment Methods</h3>
+            <p class="setting-desc" style="margin-bottom: 12px;">Choose which payment options customers see on their mobile web kiosk</p>
+            <div class="setting-item">
+              <div class="setting-info">
+                <span class="setting-title">UPI / Online Instant Payment</span>
+                <span class="setting-desc">Customers pay via UPI QR (GPay, PhonePe, Paytm). Auto-releases print.</span>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="cfgEnableUpi" checked>
+                <span class="slider"></span>
+              </label>
+            </div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <span class="setting-title">Cash Payment at Counter</span>
+                <span class="setting-desc">Customer hands cash to counter operator before document is released</span>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="cfgEnableCash" checked>
+                <span class="slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <h3>QuickPrint Software Subscription</h3>
+            <p class="setting-desc" style="margin-bottom: 12px;">Your software license plan (separate from customer print receipts)</p>
+            <div class="setting-item">
+              <div class="setting-info">
+                <span class="setting-title" id="cfgPlanTitle">14-Day Free Trial</span>
+                <span class="setting-desc" id="cfgPlanDesc">Full Counter OS terminal access. 0% print commissions.</span>
+              </div>
+              <span class="badge-chip color" id="cfgPlanBadge">ACTIVE</span>
+            </div>
+          </div>
+
+          <div class="settings-group">
             <h3>Shop Profile & Kiosk URL</h3>
             <div class="setting-item vertical">
               <label>Shop Public Name</label>

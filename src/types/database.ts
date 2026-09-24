@@ -2,9 +2,19 @@ export interface PriceConfig {
   currency: string;
   currencySymbol: string;
   rates: {
-    bw: number;     // e.g. 2.0 (Rs. 2 per page)
-    color: number;  // e.g. 10.0 (Rs. 10 per page)
+    bw: number; // e.g. 2.0 (Rs. 2 per page)
+    color: number; // e.g. 10.0 (Rs. 10 per page)
+    bw_single?: number;
+    bw_double?: number;
+    color_single?: number;
+    color_double?: number;
   };
+  rateBwSingle?: number;
+  rateBwDouble?: number;
+  rateColorSingle?: number;
+  rateColorDouble?: number;
+  rateSpiralBinding?: number;
+  rateStapling?: number;
   paperSizes: {
     [key: string]: {
       name: string;
@@ -12,6 +22,12 @@ export interface PriceConfig {
       description?: string;
     };
   };
+  payment_methods?: {
+    enable_upi?: boolean;
+    enable_cash?: boolean;
+  };
+  is_accepting_orders?: boolean;
+  orders_paused?: boolean;
   duplexDiscount?: number;
   taxPercentage?: number;
 }

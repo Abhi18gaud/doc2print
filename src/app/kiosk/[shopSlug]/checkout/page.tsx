@@ -89,11 +89,39 @@ export default function KioskCheckoutPage() {
     loadShop();
   }, [shopSlug]);
 
+  const payConfig = shop?.price_config?.payment_methods || { enable_upi: true, enable_cash: true };
+  const isUpiEnabled = payConfig.enable_upi !== false;
+  const isCashEnabled = payConfig.enable_cash !== false;
+  const hasPaymentMethod = isUpiEnabled || isCashEnabled;
+  const isOrdersPaused = shop?.price_config?.is_accepting_orders === false || shop?.price_config?.orders_paused === true;
+
+  // Auto-switch payment mode if the currently selected one is disabled by shop keeper
+  useEffect(() => {
+    if (!isUpiEnabled && isCashEnabled && paymentMode !== 'cash') {
+      setPaymentMode('cash');
+    } else if (isUpiEnabled && !isCashEnabled && paymentMode !== 'online') {
+      setPaymentMode('online');
+    }
+  }, [isUpiEnabled, isCashEnabled, paymentMode]);
+
   const handlePlaceOrder = async () => {
     setLoading(true);
     setError(null);
 
     try {
+      if (isOrdersPaused) {
+        throw new Error('This shop is currently busy and has paused taking new orders. Please check with the counter operator.');
+      }
+      if (!hasPaymentMethod) {
+        throw new Error('No payment method is currently enabled for this shop. Please ask the shopkeeper to enable payment methods.');
+      }
+      if (paymentMode === 'online' && !isUpiEnabled) {
+        throw new Error('Online payment is disabled by the shopkeeper. Please choose an enabled payment method.');
+      }
+      if (paymentMode === 'cash' && !isCashEnabled) {
+        throw new Error('Cash payment is disabled by the shopkeeper. Please choose an enabled payment method.');
+      }
+
       let activeShop = shop;
       if (!activeShop?.id) {
         const cached = sessionStorage.getItem('qp_shop_context');
@@ -305,83 +333,115 @@ export default function KioskCheckoutPage() {
           </div>
         </TicketCard>
 
-        {/* Payment Method Selector */}
-        <div className="flex flex-col gap-2.5">
-          <label className="text-[13px] font-mono uppercase tracking-wider font-bold text-[#1c1b1f] px-1">
-            SELECT PAYMENT METHOD
-          </label>
-
-          {/* Option 1: Online Payment (Cashfree UPI / Cards) */}
-          <button
-            type="button"
-            onClick={() => setPaymentMode('online')}
-            className={`p-4 rounded-lg border text-left flex items-start gap-3 transition-all ${
-              paymentMode === 'online'
-                ? 'bg-white border-[#ff5a1f] ring-2 ring-[#ff5a1f]/20 shadow-xs'
-                : 'bg-white border-[#e6e5df] hover:border-[#1c1b1f]'
-            }`}
-          >
-            <div
-              className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 mt-0.5 ${
-                paymentMode === 'online'
-                  ? 'bg-[#ff5a1f] text-white'
-                  : 'bg-[#f4f4f1] text-[#1c1b1f]'
-              }`}
-            >
-              <CreditCard className="w-5 h-5" />
+        {/* Pause Orders Alert */}
+        {isOrdersPaused && (
+          <div className="p-4 bg-[#fff8e1] border border-[#f59e0b] rounded-lg text-[#92400e] text-[13px] flex items-start gap-3 shadow-xs">
+            <AlertCircle className="w-5 h-5 shrink-0 text-[#f59e0b] mt-0.5" />
+            <div className="flex flex-col">
+              <span className="font-bold text-[14px]">Counter Busy — Orders Temporarily Paused</span>
+              <span className="text-[12px] mt-0.5 leading-relaxed">
+                The shop operator is currently clearing queued jobs and has temporarily paused new orders. Please wait or check with the counter operator.
+              </span>
             </div>
+          </div>
+        )}
 
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between">
-                <span className="text-[14px] font-bold text-[#1c1b1f]">
-                  Online UPI / Cashfree
-                </span>
-                <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-[#e6f7ee] text-[#0b4e2f]">
-                  FASTEST
-                </span>
-              </div>
-              <p className="text-[12px] text-[#6b6966] mt-0.5">
-                GPay, PhonePe, Paytm, Cards. Prints instantly without waiting.
-              </p>
+        {/* No Payment Method Warning (Requirement 6) */}
+        {!hasPaymentMethod && (
+          <div className="p-4 bg-[#ffdad6] border border-[#ba1a1a] rounded-lg text-[#93000a] text-[13px] flex items-start gap-3 shadow-xs">
+            <AlertCircle className="w-5 h-5 shrink-0 text-[#ba1a1a] mt-0.5" />
+            <div className="flex flex-col">
+              <span className="font-bold text-[14px]">Ordering Temporarily Unavailable</span>
+              <span className="text-[12px] mt-0.5 leading-relaxed">
+                No customer payment method is currently enabled for this shop. Please notify the shopkeeper at the counter to enable payment methods.
+              </span>
             </div>
-          </button>
+          </div>
+        )}
 
-          {/* Option 2: Cash at Counter */}
-          <button
-            type="button"
-            onClick={() => setPaymentMode('cash')}
-            className={`p-4 rounded-lg border text-left flex items-start gap-3 transition-all ${
-              paymentMode === 'cash'
-                ? 'bg-white border-[#1c1b1f] ring-2 ring-[#1c1b1f]/20 shadow-xs'
-                : 'bg-white border-[#e6e5df] hover:border-[#1c1b1f]'
-            }`}
-          >
-            <div
-              className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 mt-0.5 ${
-                paymentMode === 'cash'
-                  ? 'bg-[#1c1b1f] text-white'
-                  : 'bg-[#f4f4f1] text-[#1c1b1f]'
-              }`}
-            >
-              <Banknote className="w-5 h-5" />
-            </div>
+        {/* Payment Method Selector (Only show enabled payment methods - Requirement 5) */}
+        {hasPaymentMethod && (
+          <div className="flex flex-col gap-2.5">
+            <label className="text-[13px] font-mono uppercase tracking-wider font-bold text-[#1c1b1f] px-1">
+              SELECT PAYMENT METHOD
+            </label>
 
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between">
-                <span className="text-[14px] font-bold text-[#1c1b1f]">
-                  Cash at Counter
-                </span>
-                <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-[#e8e8e5] text-[#1c1b1f]">
-                  COUNTER
-                </span>
-              </div>
-              <p className="text-[12px] text-[#6b6966] mt-0.5">
-                Hand ₹{price.toFixed(2)} cash to shopkeeper. Token generates now;
-                print starts upon confirmation.
-              </p>
-            </div>
-          </button>
-        </div>
+            {/* Option 1: Online Payment (Cashfree UPI / Cards) - only if enabled */}
+            {isUpiEnabled && (
+              <button
+                type="button"
+                onClick={() => setPaymentMode('online')}
+                className={`p-4 rounded-lg border text-left flex items-start gap-3 transition-all ${
+                  paymentMode === 'online'
+                    ? 'bg-white border-[#ff5a1f] ring-2 ring-[#ff5a1f]/20 shadow-xs'
+                    : 'bg-white border-[#e6e5df] hover:border-[#1c1b1f]'
+                }`}
+              >
+                <div
+                  className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 mt-0.5 ${
+                    paymentMode === 'online'
+                      ? 'bg-[#ff5a1f] text-white'
+                      : 'bg-[#f4f4f1] text-[#1c1b1f]'
+                  }`}
+                >
+                  <CreditCard className="w-5 h-5" />
+                </div>
+
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[14px] font-bold text-[#1c1b1f]">
+                      Online UPI / Cashfree
+                    </span>
+                    <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-[#e6f7ee] text-[#0b4e2f]">
+                      FASTEST
+                    </span>
+                  </div>
+                  <p className="text-[12px] text-[#6b6966] mt-0.5">
+                    GPay, PhonePe, Paytm, Cards. Prints instantly without waiting.
+                  </p>
+                </div>
+              </button>
+            )}
+
+            {/* Option 2: Cash at Counter - only if enabled */}
+            {isCashEnabled && (
+              <button
+                type="button"
+                onClick={() => setPaymentMode('cash')}
+                className={`p-4 rounded-lg border text-left flex items-start gap-3 transition-all ${
+                  paymentMode === 'cash'
+                    ? 'bg-white border-[#1c1b1f] ring-2 ring-[#1c1b1f]/20 shadow-xs'
+                    : 'bg-white border-[#e6e5df] hover:border-[#1c1b1f]'
+                }`}
+              >
+                <div
+                  className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 mt-0.5 ${
+                    paymentMode === 'cash'
+                      ? 'bg-[#1c1b1f] text-white'
+                      : 'bg-[#f4f4f1] text-[#1c1b1f]'
+                  }`}
+                >
+                  <Banknote className="w-5 h-5" />
+                </div>
+
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[14px] font-bold text-[#1c1b1f]">
+                      Cash at Counter
+                    </span>
+                    <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-[#e8e8e5] text-[#1c1b1f]">
+                      COUNTER
+                    </span>
+                  </div>
+                  <p className="text-[12px] text-[#6b6966] mt-0.5">
+                    Hand ₹{price.toFixed(2)} cash to shopkeeper. Token generates now;
+                    print starts upon confirmation.
+                  </p>
+                </div>
+              </button>
+            )}
+          </div>
+        )}
       </main>
 
       {/* Persistent Bottom Bar */}
@@ -389,7 +449,7 @@ export default function KioskCheckoutPage() {
         <div className="max-w-xl mx-auto flex items-center justify-between gap-4">
           <div className="flex flex-col">
             <span className="text-[11px] font-mono uppercase text-[#6b6966]">
-              {paymentMode === 'online' ? 'Direct Spool' : 'Counter Cash'}
+              {isOrdersPaused ? 'Intake Paused' : !hasPaymentMethod ? 'Unavailable' : paymentMode === 'online' ? 'Direct Spool' : 'Counter Cash'}
             </span>
             <span className="text-[20px] font-mono font-bold text-[#1c1b1f]">
               ₹{price.toFixed(2)}
@@ -398,10 +458,12 @@ export default function KioskCheckoutPage() {
 
           <button
             type="button"
-            disabled={loading}
+            disabled={loading || isOrdersPaused || !hasPaymentMethod}
             onClick={handlePlaceOrder}
             className={`h-12 px-6 rounded text-white font-bold text-[14px] flex items-center gap-2 shadow-sm transition-all btn-tactile ${
-              paymentMode === 'online'
+              isOrdersPaused || !hasPaymentMethod
+                ? 'bg-[#94a3b8] cursor-not-allowed opacity-80'
+                : paymentMode === 'online'
                 ? 'bg-[#ff5a1f] hover:bg-[#e04b14]'
                 : 'bg-[#1c1b1f] hover:bg-[#333]'
             } ${loading ? 'opacity-60 cursor-not-allowed' : ''}`}
@@ -409,6 +471,10 @@ export default function KioskCheckoutPage() {
             <span>
               {loading
                 ? 'Submitting...'
+                : isOrdersPaused
+                ? 'Orders Paused'
+                : !hasPaymentMethod
+                ? 'Payments Disabled'
                 : paymentMode === 'online'
                 ? `Pay ₹${price.toFixed(2)} & Print`
                 : 'Get Token & Pay Cash'}

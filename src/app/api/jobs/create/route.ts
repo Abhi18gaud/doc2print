@@ -54,6 +54,41 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Shop not found or inactive' }, { status: 404 });
     }
 
+    // Requirement 12 & 13: Enforce shop order intake status (Pause Orders)
+    const isOrdersPaused = targetShop.price_config?.is_accepting_orders === false || targetShop.price_config?.orders_paused === true;
+    if (isOrdersPaused) {
+      return NextResponse.json(
+        { error: 'This print shop is currently busy and has paused taking new orders. Please check with the counter operator.' },
+        { status: 403 }
+      );
+    }
+
+    // Requirement 4, 5, 6: Validate requested payment mode against shop configuration
+    const payConfig = targetShop.price_config?.payment_methods || { enable_upi: true, enable_cash: true };
+    const isUpiEnabled = payConfig.enable_upi !== false;
+    const isCashEnabled = payConfig.enable_cash !== false;
+
+    if (!isUpiEnabled && !isCashEnabled) {
+      return NextResponse.json(
+        { error: 'No customer payment method is currently enabled for this shop. Please ask the shopkeeper at the counter.' },
+        { status: 400 }
+      );
+    }
+
+    if (paymentMode === 'online' && !isUpiEnabled) {
+      return NextResponse.json(
+        { error: 'Online UPI payments are disabled by this shop. Please choose an enabled payment method.' },
+        { status: 400 }
+      );
+    }
+
+    if (paymentMode === 'cash' && !isCashEnabled) {
+      return NextResponse.json(
+        { error: 'Cash payments are disabled by this shop. Please choose an enabled payment method.' },
+        { status: 400 }
+      );
+    }
+
     const shopId = targetShop.id;
 
     // Normalize file_type to 'pdf' | 'jpg' | 'png'
@@ -72,7 +107,7 @@ export async function POST(request: NextRequest) {
     else if (lowerPaper === 'custom' || lowerPaper === 'legal') normPaperSize = 'custom';
     else normPaperSize = 'A4';
 
-    // Server-verified price calculation (Requirement 14: Security)
+    // Requirement 3: Price must be server-authoritative
     const serverCalc = calculatePrintPrice({
       pages,
       copies,
@@ -81,7 +116,8 @@ export async function POST(request: NextRequest) {
       duplex,
       priceConfig: targetShop.price_config || DEFAULT_PRICE_CONFIG,
     });
-    const finalPrice = serverCalc.total > 0 ? serverCalc.total : (clientPrice || 2.0);
+    // Never trust client price; always enforce server-calculated authoritative price
+    const finalPrice = serverCalc.total;
 
     // 1. Upload file to Supabase Storage bucket 'print-files'
     const timestamp = Date.now();
