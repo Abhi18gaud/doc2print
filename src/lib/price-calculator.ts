@@ -18,6 +18,7 @@ export interface PriceCalculationResult {
   sheets: number;
   ratePerImpression: number;
   paperExtra: number;
+  finishingCost: number;
   subtotal: number;
   tax: number;
   total: number;
@@ -117,10 +118,19 @@ export function calculatePrintPrice(params: PriceCalculationParams): PriceCalcul
 
   let breakdownText = `${totalPhysicalSheets} ${totalPhysicalSheets === 1 ? 'sheet' : 'sheets'}`;
   if (params.duplex && pages > 1) {
-    breakdownText += ` (Duplex) • ${copies} ${copies === 1 ? 'copy' : 'copies'}`;
+    breakdownText += ` (Duplex)`;
   } else {
-    breakdownText += ` (${pages}p Single) • ${copies} ${copies === 1 ? 'copy' : 'copies'}`;
+    breakdownText += ` (Single)`;
   }
+  if (paperSizeKey !== 'a4' && paperOption.name) {
+    breakdownText += ` • ${paperOption.name}`;
+  }
+  if (params.binding) {
+    breakdownText += ` • Spiral Binding`;
+  } else if (params.stapling) {
+    breakdownText += ` • Corner Staple`;
+  }
+  breakdownText += ` • ${copies} ${copies === 1 ? 'copy' : 'copies'}`;
 
   return {
     pages,
@@ -129,6 +139,7 @@ export function calculatePrintPrice(params: PriceCalculationParams): PriceCalcul
     sheets: totalPhysicalSheets,
     ratePerImpression: singleRate,
     paperExtra: totalPaperExtra,
+    finishingCost,
     subtotal,
     tax,
     total,

@@ -38,6 +38,7 @@ export default function KioskOptionsPage() {
   const [colorMode, setColorMode] = useState<'bw' | 'color'>('bw');
   const [copies, setCopies] = useState(1);
   const [duplex, setDuplex] = useState(false);
+  const [finishing, setFinishing] = useState<'none' | 'stapling' | 'binding'>('none');
   const [orientation, setOrientation] = useState<'portrait' | 'landscape'>('portrait');
   const [pageSelection, setPageSelection] = useState<'all' | 'custom'>('all');
   const [customPagesInput, setCustomPagesInput] = useState('');
@@ -47,12 +48,16 @@ export default function KioskOptionsPage() {
     const storedName = sessionStorage.getItem('qp_file_name');
     const storedPages = sessionStorage.getItem('qp_file_pages');
     const storedSize = sessionStorage.getItem('qp_file_size');
+    const storedFinishing = sessionStorage.getItem('qp_finishing');
 
     if (storedName) setFileName(storedName);
     if (storedPages) setFilePages(parseInt(storedPages, 10) || 1);
     if (storedSize) {
       const bytes = parseInt(storedSize, 10) || 0;
       setFileSizeStr(`${(bytes / (1024 * 1024)).toFixed(1)} MB`);
+    }
+    if (storedFinishing === 'stapling' || storedFinishing === 'binding' || storedFinishing === 'none') {
+      setFinishing(storedFinishing as any);
     }
 
     // 1. Immediately restore cached shop if available
@@ -107,11 +112,25 @@ export default function KioskOptionsPage() {
   const rates = priceCfg.rates || {};
   const isOrdersPaused = priceCfg.is_accepting_orders === false || priceCfg.orders_paused === true;
 
-  const displayBwRate = duplex
+  // Paper sizes extra fee configured by shop keeper
+  const paperSizesCfg = priceCfg.paperSizes || DEFAULT_PRICE_CONFIG.paperSizes || {};
+  const a3Extra = paperSizesCfg.a3?.extra != null ? Number(paperSizesCfg.a3.extra) : 4.0;
+  const legalExtra = paperSizesCfg.custom?.extra != null ? Number(paperSizesCfg.custom.extra) : 2.0;
+  const passportExtra = paperSizesCfg.passport?.extra != null ? Number(paperSizesCfg.passport.extra) : 35.0;
+
+  // Finishing & services configured in Desktop Pricing Catalog
+  const rateSpiral = priceCfg.rateSpiralBinding != null ? Number(priceCfg.rateSpiralBinding) : 30.0;
+  const rateStaple = priceCfg.rateStapling != null ? Number(priceCfg.rateStapling) : 2.0;
+
+  // 1-page document cannot be duplexed (only 1 side physically exists)
+  const isDuplexApplicable = effectivePages > 1;
+  const isDuplexActive = duplex && isDuplexApplicable;
+
+  const displayBwRate = isDuplexActive
     ? (rates.bw_double != null ? rates.bw_double : priceCfg.rateBwDouble != null ? priceCfg.rateBwDouble : ((rates.bw_single || rates.bw || priceCfg.rateBwSingle || 2) * 1.5))
     : (rates.bw_single != null ? rates.bw_single : rates.bw != null ? rates.bw : priceCfg.rateBwSingle != null ? priceCfg.rateBwSingle : 2);
 
-  const displayColorRate = duplex
+  const displayColorRate = isDuplexActive
     ? (rates.color_double != null ? rates.color_double : priceCfg.rateColorDouble != null ? priceCfg.rateColorDouble : ((rates.color_single || rates.color || priceCfg.rateColorSingle || 10) * 1.8))
     : (rates.color_single != null ? rates.color_single : rates.color != null ? rates.color : priceCfg.rateColorSingle != null ? priceCfg.rateColorSingle : 10);
 
@@ -120,7 +139,9 @@ export default function KioskOptionsPage() {
     copies,
     colorMode,
     paperSize,
-    duplex,
+    duplex: isDuplexActive,
+    binding: finishing === 'binding',
+    stapling: finishing === 'stapling',
     priceConfig: priceCfg,
   });
 
@@ -131,7 +152,10 @@ export default function KioskOptionsPage() {
     sessionStorage.setItem('qp_paper_size', paperSize);
     sessionStorage.setItem('qp_color_mode', colorMode);
     sessionStorage.setItem('qp_copies', String(copies));
-    sessionStorage.setItem('qp_duplex', String(duplex));
+    sessionStorage.setItem('qp_duplex', String(isDuplexActive));
+    sessionStorage.setItem('qp_finishing', finishing);
+    sessionStorage.setItem('qp_binding', String(finishing === 'binding'));
+    sessionStorage.setItem('qp_stapling', String(finishing === 'stapling'));
     sessionStorage.setItem('qp_orientation', orientation);
     sessionStorage.setItem('qp_pages', String(effectivePages));
     sessionStorage.setItem('qp_price', String(calculation.total));
@@ -230,9 +254,9 @@ export default function KioskOptionsPage() {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             {[
               { id: 'a4', name: 'A4', note: 'Standard' },
-              { id: 'a3', name: 'A3', note: '+₹4.00' },
-              { id: 'passport', name: 'Passport (8×)', note: 'Glossy' },
-              { id: 'custom', name: 'Legal/Bond', note: '+₹2.00' },
+              { id: 'a3', name: 'A3', note: a3Extra > 0 ? `+₹${a3Extra.toFixed(2)}` : 'Standard' },
+              { id: 'passport', name: 'Passport (8×)', note: passportExtra > 0 ? `+₹${passportExtra.toFixed(2)}` : 'Glossy' },
+              { id: 'custom', name: 'Legal/Bond', note: legalExtra > 0 ? `+₹${legalExtra.toFixed(2)}` : 'Standard' },
             ].map((size) => {
               const isSelected = paperSize === size.id;
               return (
@@ -306,7 +330,7 @@ export default function KioskOptionsPage() {
                     ₹{displayBwRate.toFixed(2)}
                   </span>
                   <span className="text-[11px] text-[#6b6966]">
-                    {duplex ? '/ sheet' : '/ page'}
+                    {isDuplexActive ? '/ sheet' : '/ page'}
                   </span>
                 </div>
               </div>
@@ -345,7 +369,7 @@ export default function KioskOptionsPage() {
                     ₹{displayColorRate.toFixed(2)}
                   </span>
                   <span className="text-[11px] text-[#6b6966]">
-                    {duplex ? '/ sheet' : '/ page'}
+                    {isDuplexActive ? '/ sheet' : '/ page'}
                   </span>
                 </div>
               </div>
@@ -395,19 +419,25 @@ export default function KioskOptionsPage() {
               <span>Print Sides</span>
             </label>
             <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-[#e8e8e5] text-[#1c1b1f]">
-              {duplex ? 'BACK-TO-BACK' : 'SINGLE-SIDED'}
+              {isDuplexActive ? 'BACK-TO-BACK (2-SIDED)' : 'SINGLE-SIDED'}
             </span>
           </div>
 
           <div className="grid grid-cols-2 gap-2 p-1 bg-[#f4f4f1] rounded-lg border border-[#e6e5df]">
             <button
               type="button"
-              onClick={() => setDuplex(true)}
+              disabled={!isDuplexApplicable}
+              onClick={() => {
+                if (isDuplexApplicable) setDuplex(true);
+              }}
               className={`py-2 px-3 rounded text-[13px] font-bold transition-all ${
-                duplex
+                !isDuplexApplicable
+                  ? 'opacity-40 cursor-not-allowed text-[#94a3b8]'
+                  : isDuplexActive
                   ? 'bg-white text-[#1c1b1f] shadow-xs border border-[#e6e5df]'
                   : 'text-[#6b6966] hover:text-[#1c1b1f]'
               }`}
+              title={!isDuplexApplicable ? 'Document has only 1 page. Back-to-Back requires 2 or more pages.' : ''}
             >
               Back-to-Back (2-Sided)
             </button>
@@ -415,7 +445,7 @@ export default function KioskOptionsPage() {
               type="button"
               onClick={() => setDuplex(false)}
               className={`py-2 px-3 rounded text-[13px] font-bold transition-all ${
-                !duplex
+                !isDuplexActive
                   ? 'bg-white text-[#1c1b1f] shadow-xs border border-[#e6e5df]'
                   : 'text-[#6b6966] hover:text-[#1c1b1f]'
               }`}
@@ -423,9 +453,76 @@ export default function KioskOptionsPage() {
               Single-Sided (1-Sided)
             </button>
           </div>
+
+          {!isDuplexApplicable && (
+            <div className="flex items-center gap-1.5 p-2 bg-[#f8fafc] border border-[#e2e8f0] rounded text-[11px] text-[#64748b] font-mono">
+              <span>ℹ️</span>
+              <span>1-page document automatically prints single-sided (Back-to-back requires 2+ pages).</span>
+            </div>
+          )}
         </div>
 
-        {/* 5. Orientation & Page Range */}
+        {/* 5. Finishing & Services */}
+        <div className="bg-white rounded-lg p-4 border border-[#e6e5df] shadow-xs flex flex-col gap-2.5">
+          <div className="flex items-center justify-between">
+            <label className="text-[14px] font-bold text-[#1c1b1f] flex items-center gap-1.5">
+              <Sparkles className="w-4 h-4 text-[#ff5a1f]" />
+              <span>Finishing & Add-ons</span>
+            </label>
+            <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-[#e8e8e5] text-[#1c1b1f]">
+              {finishing === 'none' ? 'LOOSE SHEETS' : finishing === 'stapling' ? 'CORNER STAPLE' : 'SPIRAL BOUND'}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { id: 'none', title: 'None', subtitle: 'Loose Sheets', extraText: 'Standard' },
+              { id: 'stapling', title: 'Corner Staple', subtitle: 'Pin Fixed', extraText: rateStaple > 0 ? `+₹${rateStaple.toFixed(2)}` : 'Free' },
+              { id: 'binding', title: 'Spiral Binding', subtitle: 'Booklet Coil', extraText: rateSpiral > 0 ? `+₹${rateSpiral.toFixed(2)}` : 'Standard' },
+            ].map((opt) => {
+              const isSelected = finishing === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => setFinishing(opt.id as any)}
+                  className={`p-2.5 rounded text-left border transition-all flex flex-col justify-between ${
+                    isSelected
+                      ? 'bg-[#1c1b1f] text-white border-[#1c1b1f] shadow-xs'
+                      : 'bg-[#fafaf7] text-[#1c1b1f] border-[#e6e5df] hover:border-[#1c1b1f]'
+                  }`}
+                >
+                  <span className="text-[13px] font-bold leading-tight">{opt.title}</span>
+                  <div className="mt-1 flex flex-col">
+                    <span
+                      className={`text-[10px] font-mono ${
+                        isSelected ? 'text-[#a8a6a1]' : 'text-[#6b6966]'
+                      }`}
+                    >
+                      {opt.subtitle}
+                    </span>
+                    <span
+                      className={`text-[11px] font-mono font-bold mt-0.5 ${
+                        isSelected ? 'text-[#ff9800]' : opt.id !== 'none' ? 'text-[#ff5a1f]' : 'text-[#6b6966]'
+                      }`}
+                    >
+                      {opt.extraText}
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          <span className="text-[11px] text-[#6b6966] font-mono">
+            {finishing === 'binding'
+              ? 'Includes plastic spiral coil with transparent front & protective back sheets.'
+              : finishing === 'stapling'
+              ? 'Secure single corner staple for clean handouts & reports.'
+              : 'Individual loose sheets without stapling or binding.'}
+          </span>
+        </div>
+
+        {/* 6. Orientation & Page Range */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {/* Orientation */}
           <div className="bg-white rounded-lg p-4 border border-[#e6e5df] shadow-xs flex flex-col gap-2">

@@ -36,6 +36,8 @@ export default function KioskCheckoutPage() {
   const [colorMode, setColorMode] = useState<'bw' | 'color'>('bw');
   const [copies, setCopies] = useState(1);
   const [duplex, setDuplex] = useState(false);
+  const [binding, setBinding] = useState(false);
+  const [stapling, setStapling] = useState(false);
   const [orientation, setOrientation] = useState('portrait');
   const [pages, setPages] = useState(1);
   const [price, setPrice] = useState(2.0);
@@ -51,6 +53,8 @@ export default function KioskCheckoutPage() {
     const storedColor = sessionStorage.getItem('qp_color_mode');
     const storedCopies = sessionStorage.getItem('qp_copies');
     const storedDuplex = sessionStorage.getItem('qp_duplex');
+    const storedBinding = sessionStorage.getItem('qp_binding') === 'true';
+    const storedStapling = sessionStorage.getItem('qp_stapling') === 'true';
     const storedOrientation = sessionStorage.getItem('qp_orientation');
     const storedPages = sessionStorage.getItem('qp_pages');
     const storedPrice = sessionStorage.getItem('qp_price');
@@ -61,6 +65,8 @@ export default function KioskCheckoutPage() {
     if (storedColor) setColorMode(storedColor as any);
     if (storedCopies) setCopies(parseInt(storedCopies, 10) || 1);
     if (storedDuplex) setDuplex(storedDuplex === 'true');
+    setBinding(storedBinding);
+    setStapling(storedStapling);
     if (storedOrientation) setOrientation(storedOrientation);
     if (storedPages) setPages(parseInt(storedPages, 10) || 1);
     if (storedPrice) setPrice(parseFloat(storedPrice) || 2.0);
@@ -178,6 +184,8 @@ export default function KioskCheckoutPage() {
       formData.append('paper_size', paperSize);
       formData.append('color_mode', colorMode);
       formData.append('duplex', String(duplex));
+      formData.append('binding', String(binding));
+      formData.append('stapling', String(stapling));
       formData.append('orientation', orientation);
       formData.append('price', String(price));
       formData.append('payment_mode', paymentMode);
@@ -300,10 +308,16 @@ export default function KioskCheckoutPage() {
               </div>
 
               <div className="flex items-center justify-between text-[13px]">
-                <span className="text-[#6b6966]">Sets & Binding</span>
+                <span className="text-[#6b6966]">Sets & Sides</span>
                 <span className="font-mono font-semibold text-[#1c1b1f]">
-                  {copies} {copies === 1 ? 'copy' : 'copies'} (
-                  {duplex ? 'Duplex 2-Sided' : 'Single-Sided'})
+                  {copies} {copies === 1 ? 'copy' : 'copies'} ({duplex ? 'Duplex 2-Sided' : 'Single-Sided'})
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between text-[13px]">
+                <span className="text-[#6b6966]">Finishing</span>
+                <span className="font-mono font-semibold text-[#1c1b1f]">
+                  {binding ? '🌀 Spiral Binding' : stapling ? '📎 Corner Staple' : 'Loose Sheets'}
                 </span>
               </div>
 

@@ -13,6 +13,8 @@ export async function POST(request: NextRequest) {
     const rawPaperSize = (formData.get('paper_size') as string) || 'A4';
     const colorMode = (formData.get('color_mode') as string) || 'bw';
     const duplex = formData.get('duplex') === 'true';
+    const binding = formData.get('binding') === 'true';
+    const stapling = formData.get('stapling') === 'true';
     const orientation = (formData.get('orientation') as string) || 'portrait';
     const clientPrice = parseFloat((formData.get('price') as string) || '0');
     const paymentMode = (formData.get('payment_mode') as string) || 'cash';
@@ -114,10 +116,16 @@ export async function POST(request: NextRequest) {
       colorMode: colorMode === 'color' ? 'color' : 'bw',
       paperSize: normPaperSize,
       duplex,
+      binding,
+      stapling,
       priceConfig: targetShop.price_config || DEFAULT_PRICE_CONFIG,
     });
     // Never trust client price; always enforce server-calculated authoritative price
     const finalPrice = serverCalc.total;
+
+    let finalPaperSize = normPaperSize;
+    if (binding) finalPaperSize = `${normPaperSize} + Spiral Binding`;
+    else if (stapling) finalPaperSize = `${normPaperSize} + Corner Stapling`;
 
     // 1. Upload file to Supabase Storage bucket 'print-files'
     const timestamp = Date.now();
@@ -175,7 +183,7 @@ export async function POST(request: NextRequest) {
         file_size_bytes: file.size,
         pages,
         copies,
-        paper_size: normPaperSize,
+        paper_size: finalPaperSize,
         color_mode: colorMode === 'color' ? 'color' : 'bw',
         duplex,
         orientation: orientation === 'landscape' ? 'landscape' : 'portrait',

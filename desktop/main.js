@@ -725,8 +725,8 @@ function registerIpcHandlers() {
     try {
       const printerName = options.printerName || appConfig.defaultPrinter || 'Microsoft Print to PDF';
       const fileUrl = options.fileUrl || job.file_url;
-      const copies = Number(options.copies || job.copies || 1);
-      const paperSize = (options.paperSize || job.paper_size || 'A4').toUpperCase();
+      const rawPaper = options.paperSize || job.paper_size || 'A4';
+      const paperSize = rawPaper.split(' + ')[0].toUpperCase();
       const duplex = options.duplex ?? job.duplex ?? false;
 
       if (!fileUrl) {
@@ -950,10 +950,10 @@ function registerIpcHandlers() {
           rateColorDouble: doubleColor,
           rateSpiralBinding: Number(pricing.rateSpiralBinding || 30.0),
           rateStapling: Number(pricing.rateStapling || 2.0),
-          paperSizes: {
+          paperSizes: pricing.paperSizes || prevConfig.paperSizes || {
             a4: { name: 'A4', extra: 0.0, description: 'Standard 75 GSM' },
             a3: { name: 'A3', extra: 4.0, description: 'Large Sheet' },
-            passport: { name: 'Passport (8×)', extra: 30.0, description: 'Glossy Sheet' },
+            passport: { name: 'Passport (8×)', extra: 35.0, description: 'Glossy Sheet' },
             custom: { name: 'Custom / Legal', extra: 2.0, description: 'Legal/Bond' },
           },
         };

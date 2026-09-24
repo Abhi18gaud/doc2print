@@ -97,6 +97,9 @@
   const rateColorDouble = document.getElementById('rateColorDouble');
   const rateSpiralBinding = document.getElementById('rateSpiralBinding');
   const rateStapling = document.getElementById('rateStapling');
+  const ratePaperA3 = document.getElementById('ratePaperA3');
+  const ratePaperLegal = document.getElementById('ratePaperLegal');
+  const ratePaperPassport = document.getElementById('ratePaperPassport');
   const btnSavePricing = document.getElementById('btnSavePricing');
 
   // View: Settings
@@ -349,6 +352,12 @@
       rateColorDouble.value = rates.color_double || pricing.rateColorDouble || (rates.color ? rates.color * 1.8 : 18);
       rateSpiralBinding.value = pricing.rateSpiralBinding || 30;
       rateStapling.value = pricing.rateStapling || 2;
+
+      // Paper sizes extra fees
+      const paperSizes = pricing.paperSizes || {};
+      if (ratePaperA3) ratePaperA3.value = paperSizes.a3?.extra != null ? paperSizes.a3.extra : 4.0;
+      if (ratePaperLegal) ratePaperLegal.value = paperSizes.custom?.extra != null ? paperSizes.custom.extra : 2.0;
+      if (ratePaperPassport) ratePaperPassport.value = paperSizes.passport?.extra != null ? paperSizes.passport.extra : 35.0;
 
       // Payment methods configuration
       const payMethods = pricing.payment_methods || { enable_upi: true, enable_cash: true };
@@ -660,8 +669,10 @@
       const pages = job.page_count || 1;
       const totalPages = pages * copies;
       const colorMode = job.color_mode === 'color' ? 'Full Color' : 'B&W';
-      const duplexMode = job.duplex ? 'Duplex (Both Sides)' : 'Single Sided';
-      const paperSize = job.paper_size || 'A4';
+      const rawPaper = job.paper_size || 'A4';
+      const isSpiral = job.binding || rawPaper.includes('Spiral');
+      const isStapled = job.stapling || rawPaper.includes('Staple');
+      const basePaper = rawPaper.split(' + ')[0];
       const amount = (job.total_amount || 0).toFixed(2);
 
       card.innerHTML = `
@@ -680,8 +691,9 @@
               <span class="spec-chip ${job.color_mode === 'color' ? 'color' : 'bw'}">${colorMode}</span>
               <span class="spec-chip">${pages} Pages × ${copies} Copy</span>
               <span class="spec-chip">${duplexMode}</span>
-              <span class="spec-chip">${paperSize}</span>
-              ${job.binding ? '<span class="spec-chip color">Spiral Binding</span>' : ''}
+              <span class="spec-chip">${basePaper}</span>
+              ${isSpiral ? '<span class="spec-chip color" style="font-weight:700;">🌀 Spiral Binding</span>' : ''}
+              ${isStapled ? '<span class="spec-chip" style="background:#eff6ff; color:#1d4ed8; border-color:#bfdbfe; font-weight:700;">📎 Corner Staple</span>' : ''}
             </div>
           </div>
         </div>
@@ -780,7 +792,7 @@
         fileUrl: job.file_url,
         copies: job.copies || 1,
         duplex: job.duplex,
-        paperSize: job.paper_size || 'A4',
+        paperSize: (job.paper_size || 'A4').split(' + ')[0],
       });
 
       if (res.success) {
@@ -993,6 +1005,12 @@
       rateColorDouble: parseFloat(rateColorDouble.value) || 18.0,
       rateSpiralBinding: parseFloat(rateSpiralBinding.value) || 30.0,
       rateStapling: parseFloat(rateStapling.value) || 2.0,
+      paperSizes: {
+        a4: { name: 'A4', extra: 0.0, description: 'Standard 75 GSM' },
+        a3: { name: 'A3', extra: parseFloat(ratePaperA3 ? ratePaperA3.value : '4') || 0.0, description: 'Large Sheet' },
+        custom: { name: 'Legal/Bond', extra: parseFloat(ratePaperLegal ? ratePaperLegal.value : '2') || 0.0, description: 'Legal / Bond' },
+        passport: { name: 'Passport (8×)', extra: parseFloat(ratePaperPassport ? ratePaperPassport.value : '35') || 0.0, description: 'Glossy Sheet' },
+      },
     };
 
     btnSavePricing.disabled = true;
