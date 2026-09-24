@@ -105,7 +105,18 @@
   const cfgAutoPrintDefault = document.getElementById('cfgAutoPrintDefault');
   const cfgShopName = document.getElementById('cfgShopName');
   const cfgShopSlug = document.getElementById('cfgShopSlug');
+  const cfgDomainPrefix = document.getElementById('cfgDomainPrefix');
   const btnSaveSettings = document.getElementById('btnSaveSettings');
+
+  let currentAppUrl = 'https://doc2print.vercel.app';
+
+  function getCleanDomain(url) {
+    try {
+      return new URL(url || currentAppUrl).host;
+    } catch (e) {
+      return 'doc2print.vercel.app';
+    }
+  }
 
   // Modals
   const qrModal = document.getElementById('qrModal');
@@ -273,31 +284,48 @@
 
       authOverlay.classList.add('hidden');
 
+      // Fetch appConfig for cloud app URL
+      try {
+        if (window.quickprintApi?.getConfig) {
+          const cfg = await window.quickprintApi.getConfig();
+          if (cfg?.appUrl) {
+            currentAppUrl = cfg.appUrl.replace(/\/+$/, '');
+          }
+        }
+      } catch (cfgErr) {
+        console.warn('Could not read app config:', cfgErr);
+      }
+
       // Normalize shop slug
       const shopSlug = currentShop.qr_code_slug || currentShop.slug || 'counter';
       currentShop.slug = shopSlug;
       currentShop.qr_code_slug = shopSlug;
 
+      const cleanDomain = getCleanDomain(currentAppUrl);
+
       // Update UI with shop data
       shopNameDisplay.textContent = currentShop.name;
-      shopSlugDisplay.textContent = `quickprint.in/kiosk/${shopSlug}`;
+      shopSlugDisplay.textContent = `${cleanDomain}/kiosk/${shopSlug}`;
       shopAvatar.textContent = currentShop.name.substring(0, 2).toUpperCase();
       ownerEmailDisplay.textContent = currentOwner.email;
       ownerInitial.textContent = currentOwner.email.charAt(0).toUpperCase();
 
       cfgShopName.value = currentShop.name;
       cfgShopSlug.value = shopSlug;
+      if (cfgDomainPrefix) cfgDomainPrefix.textContent = `${cleanDomain}/kiosk/`;
 
       await renderShopQrAndUrls();
 
-      // Pricing values
-      if (currentShop.settings) {
-        rateBwSingle.value = currentShop.settings.rateBwSingle || 2;
-        rateBwDouble.value = currentShop.settings.rateBwDouble || 3;
-        rateColorSingle.value = currentShop.settings.rateColorSingle || 10;
-        rateColorDouble.value = currentShop.settings.rateColorDouble || 18;
-        rateSpiralBinding.value = currentShop.settings.rateSpiralBinding || 30;
-        rateStapling.value = currentShop.settings.rateStapling || 2;
+      // Pricing values (support both price_config schema and flat rates)
+      const pricing = currentShop.price_config || currentShop.settings;
+      if (pricing) {
+        const rates = pricing.rates || {};
+        rateBwSingle.value = rates.bw || pricing.rateBwSingle || 2;
+        rateBwDouble.value = pricing.rateBwDouble || (rates.bw ? rates.bw * 1.5 : 3);
+        rateColorSingle.value = rates.color || pricing.rateColorSingle || 10;
+        rateColorDouble.value = pricing.rateColorDouble || (rates.color ? rates.color * 1.8 : 18);
+        rateSpiralBinding.value = pricing.rateSpiralBinding || 30;
+        rateStapling.value = pricing.rateStapling || 2;
       }
 
       // Scan printers and load initial jobs
@@ -413,11 +441,40 @@
     showToast('Printers updated.', 'success');
   });
 
+  // Normalize DB job record to Counter OS UI contract
+  function normalizeJob(raw) {
+    if (!raw) return raw;
+    const tokenDisplay = raw.token_number
+      ? `#${String(raw.token_number).padStart(3, '0')}`
+      : `#${(raw.id || '').substring(0, 4).toUpperCase()}`;
+
+    const printStatus = raw.print_status || raw.status || 'queued';
+    let uiStatus = 'pending';
+    if (printStatus === 'printing') uiStatus = 'printing';
+    else if (printStatus === 'completed') uiStatus = 'completed';
+    else if (printStatus === 'failed') uiStatus = 'failed';
+    else if (printStatus === 'queued' || printStatus === 'pending_payment') uiStatus = 'pending';
+
+    const rawPayment = (raw.payment_status || (raw.payment_mode === 'cash' ? 'pending' : 'paid')).toLowerCase();
+    const isPaid = rawPayment === 'paid';
+
+    return {
+      ...raw,
+      token_number: tokenDisplay,
+      raw_token: raw.token_number,
+      page_count: raw.pages || raw.page_count || 1,
+      total_amount: Number(raw.price != null ? raw.price : (raw.total_amount || 0)),
+      status: uiStatus,
+      payment_status: isPaid ? 'paid' : 'pending',
+      customer_name: raw.customer_name || raw.file_name || 'Walk-in Customer',
+    };
+  }
+
   // --- REAL-TIME JOBS & QUEUE ---
   async function fetchJobs() {
     try {
       const jobs = await window.quickprintApi.getJobs();
-      activeJobs = jobs || [];
+      activeJobs = (jobs || []).map(normalizeJob);
       renderQueue();
       updateFinancials();
     } catch (err) {
@@ -840,6 +897,7 @@
       await window.quickprintApi.saveSettings(settings);
       showToast('Settings saved successfully.', 'success');
       shopNameDisplay.textContent = settings.shopName || currentShop.name;
+      await renderShopQrAndUrls();
     } catch (e) {
       showToast('Failed to save preferences.', 'danger');
     }
@@ -851,7 +909,13 @@
     currentShop.slug = shopSlug;
     currentShop.qr_code_slug = shopSlug;
 
-    const kioskUrl = `https://quickprint.in/kiosk/${shopSlug}`;
+    const baseUrl = (currentAppUrl || 'https://doc2print.vercel.app').replace(/\/+$/, '');
+    const cleanDomain = getCleanDomain(baseUrl);
+
+    if (shopSlugDisplay) shopSlugDisplay.textContent = `${cleanDomain}/kiosk/${shopSlug}`;
+    if (cfgDomainPrefix) cfgDomainPrefix.textContent = `${cleanDomain}/kiosk/`;
+
+    const kioskUrl = `${baseUrl}/kiosk/${shopSlug}`;
     if (qrUrlBadge) qrUrlBadge.textContent = kioskUrl;
 
     const qrImageDisplay = document.getElementById('qrImageDisplay');
@@ -872,11 +936,11 @@
       }
     }
 
-    const tvUrl = `https://quickprint.in/tv/${shopSlug}`;
+    const tvUrl = `${baseUrl}/tv/${shopSlug}`;
     const tvDisplayUrlInput = document.getElementById('tvDisplayUrlInput');
     const tvSmartTvUrl = document.getElementById('tvSmartTvUrl');
     if (tvDisplayUrlInput) tvDisplayUrlInput.value = tvUrl;
-    if (tvSmartTvUrl) tvSmartTvUrl.textContent = `quickprint.in/tv/${shopSlug}`;
+    if (tvSmartTvUrl) tvSmartTvUrl.textContent = `${cleanDomain}/tv/${shopSlug}`;
   }
 
   // --- MODAL: COUNTER QR ---
@@ -917,7 +981,7 @@
     if (window.quickprintApi?.openTvWindow) {
       window.quickprintApi.openTvWindow(slug);
     } else {
-      window.open(`https://quickprint.in/tv/${slug}`, '_blank');
+      window.open(`${currentAppUrl}/tv/${slug}`, '_blank');
     }
   }
 
@@ -927,7 +991,7 @@
   if (btnCopyTvUrl) {
     btnCopyTvUrl.addEventListener('click', () => {
       const slug = currentShop?.slug || currentShop?.qr_code_slug || 'counter';
-      const tvUrl = `https://quickprint.in/tv/${slug}`;
+      const tvUrl = `${currentAppUrl}/tv/${slug}`;
       navigator.clipboard.writeText(tvUrl).then(() => {
         showToast('TV Waiting Board URL copied to clipboard!', 'success');
       });
@@ -937,7 +1001,7 @@
   if (btnOpenTvBrowser) {
     btnOpenTvBrowser.addEventListener('click', () => {
       const slug = currentShop?.slug || currentShop?.qr_code_slug || 'counter';
-      const tvUrl = `https://quickprint.in/tv/${slug}`;
+      const tvUrl = `${currentAppUrl}/tv/${slug}`;
       if (window.quickprintApi?.openExternal) {
         window.quickprintApi.openExternal(tvUrl);
       } else {
@@ -1005,16 +1069,17 @@
   // --- LISTEN FOR REALTIME INCOMING JOBS FROM ELECTRON IPC ---
   if (window.quickprintApi?.onJobReceived) {
     window.quickprintApi.onJobReceived((incomingJob) => {
-      activeJobs.unshift(incomingJob);
+      const normalized = normalizeJob(incomingJob);
+      activeJobs.unshift(normalized);
       if (cfgSoundAlert.checked && orderChime) {
         orderChime.play().catch(() => {});
       }
-      showToast(`New Order Token #${incomingJob.token_number || '001'} received!`, 'success');
+      showToast(`New Order Token ${normalized.token_number} received!`, 'success');
       renderQueue();
       updateFinancials();
 
-      if (autoPrintEnabled && incomingJob.payment_status === 'paid') {
-        executePrint(incomingJob);
+      if (autoPrintEnabled && normalized.payment_status === 'paid') {
+        executePrint(normalized);
       }
     });
   }

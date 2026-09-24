@@ -31,13 +31,45 @@ const userDataPath = app.getPath('userData');
 const sessionFilePath = path.join(userDataPath, 'quickprint_session.json');
 const configFilePath = path.join(userDataPath, 'quickprint_config.json');
 
+// Helper to parse key=value lines from .env files without external dependencies
+function loadEnvFile(envPath) {
+  if (fs.existsSync(envPath)) {
+    try {
+      const content = fs.readFileSync(envPath, 'utf8');
+      const lines = content.split('\n');
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const eqIdx = trimmed.indexOf('=');
+        if (eqIdx !== -1) {
+          const key = trimmed.slice(0, eqIdx).trim();
+          const val = trimmed.slice(eqIdx + 1).trim().replace(/^["']|["']$/g, '');
+          if (!process.env[key]) {
+            process.env[key] = val;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Error reading env file:', envPath, e.message);
+    }
+  }
+}
+
+// Load env files in order of preference
+loadEnvFile(path.join(__dirname, '.env'));
+loadEnvFile(path.join(__dirname, '.env.local'));
+loadEnvFile(path.join(__dirname, '..', '.env.local'));
+loadEnvFile(path.join(userDataPath, '.env'));
+
 // Default initial config with production credentials
-const DEFAULT_SUPABASE_URL = 'https://iixcylrdqfdxfsldcygm.supabase.co';
-const DEFAULT_SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlpeGN5bHJkcWZkeGZzbGRjeWdtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk4NDI3ODksImV4cCI6MjEwNTQxODc4OX0.lavqpkI94x1yyIfUQdOJGeAG5jESdmVZ7qxsAE6FhMQ';
+const DEFAULT_SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://iixcylrdqfdxfsldcygm.supabase.co';
+const DEFAULT_SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlpeGN5bHJkcWZkeGZzbGRjeWdtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk4NDI3ODksImV4cCI6MjEwNTQxODc4OX0.lavqpkI94x1yyIfUQdOJGeAG5jESdmVZ7qxsAE6FhMQ';
+const DEFAULT_APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://doc2print.vercel.app';
 
 let appConfig = {
   shopId: '',
   shopSlug: 'counter',
+  appUrl: DEFAULT_APP_URL,
   supabaseUrl: DEFAULT_SUPABASE_URL,
   supabaseAnonKey: DEFAULT_SUPABASE_ANON_KEY,
   defaultPrinter: '',
@@ -70,6 +102,11 @@ if (fs.existsSync(configFilePath)) {
   } catch (err) {
     console.error('Error reading user config:', err);
   }
+}
+
+// Upgrade legacy domain to real deployed domain if needed
+if (!appConfig.appUrl || appConfig.appUrl.includes('quickprint.in')) {
+  appConfig.appUrl = DEFAULT_APP_URL;
 }
 
 // Ensure keys are NEVER blank
@@ -227,7 +264,7 @@ function createTray() {
     {
       label: 'Open Customer Web Kiosk',
       click: () => {
-        shell.openExternal(`https://quickprint.in/kiosk/${appConfig.shopSlug || 'counter'}`);
+        shell.openExternal(`${appConfig.appUrl || DEFAULT_APP_URL}/kiosk/${appConfig.shopSlug || 'counter'}`);
       },
     },
     { type: 'separator' },
@@ -280,9 +317,11 @@ function setupRealtimeJobs(shopId) {
           }
 
           if (Notification.isSupported()) {
+            const displayPrice = job.price != null ? job.price : (job.total_amount || 0);
+            const displayName = job.customer_name || job.file_name || 'Customer';
             new Notification({
               title: `New Order Token #${job.token_number || '001'}`,
-              body: `${job.customer_name || 'Customer'} • ₹${job.total_amount || 0} (${job.payment_status?.toUpperCase()})`,
+              body: `${displayName} • ₹${displayPrice} (${(job.payment_status || 'PENDING').toUpperCase()})`,
             }).show();
           }
         }
@@ -339,7 +378,7 @@ function registerIpcHandlers() {
   let tvWindow = null;
   ipcMain.on('open-tv-window', (_e, slug) => {
     const targetSlug = slug || appConfig.shopSlug || 'counter';
-    const baseUrl = appConfig.appUrl || 'http://localhost:3000';
+    const baseUrl = (appConfig.appUrl || DEFAULT_APP_URL).replace(/\/+$/, '');
     const tvUrl = `${baseUrl}/tv/${targetSlug}`;
     console.log('[TV] Opening TV Waiting Board window:', tvUrl);
 
@@ -612,7 +651,7 @@ function registerIpcHandlers() {
         await client
           .from('jobs')
           .update({
-            status: 'completed',
+            print_status: 'completed',
             completed_at: new Date().toISOString(),
           })
           .eq('id', jobId);
@@ -653,9 +692,10 @@ function registerIpcHandlers() {
   ipcMain.handle('jobs-update-status', async (_e, { jobId, status }) => {
     const client = getSupabase();
     if (client && jobId && !jobId.startsWith('demo-')) {
+      const print_status = status === 'pending' ? 'queued' : status;
       await client
         .from('jobs')
-        .update({ status })
+        .update({ print_status })
         .eq('id', jobId);
     }
     return { success: true };
@@ -669,25 +709,55 @@ function registerIpcHandlers() {
 
     if (client && shopId) {
       try {
+        const priceConfig = {
+          currency: 'INR',
+          currencySymbol: '₹',
+          rates: {
+            bw: pricing.rateBwSingle || 2.0,
+            color: pricing.rateColorSingle || 10.0,
+          },
+          paperSizes: {
+            a4: { name: 'A4', extra: 0.0, description: 'Standard 75 GSM' },
+            a3: { name: 'A3', extra: 4.0, description: 'Large Sheet' },
+            passport: { name: 'Passport (8×)', extra: 30.0, description: 'Glossy Sheet' },
+            custom: { name: 'Custom / Legal', extra: 2.0, description: 'Legal/Bond' },
+          },
+          duplexDiscount: 0,
+          taxPercentage: 0,
+          ...pricing,
+        };
+
         await client
           .from('shops')
-          .update({ settings: pricing })
+          .update({ price_config: priceConfig })
           .eq('id', shopId);
-      } catch (e) { }
+      } catch (e) {
+        console.warn('Failed to update price_config in DB:', e.message);
+      }
     }
     return { success: true };
   });
 
-  // Settings: Save Preferences
+  // Settings: Get Config
+  ipcMain.handle('settings-get-config', async () => {
+    return { ...appConfig };
+  });
+
+  // Settings: Save Preferences (Shopkeeper preferences only — domain is protected)
   ipcMain.handle('settings-save', async (_e, settings) => {
-    appConfig = { ...appConfig, ...settings };
+    if (typeof settings.autoLaunch === 'boolean') appConfig.autoLaunch = settings.autoLaunch;
+    if (typeof settings.soundAlert === 'boolean') appConfig.soundAlert = settings.soundAlert;
+    if (typeof settings.autoPrintDefault === 'boolean') appConfig.autoPrintEnabled = settings.autoPrintDefault;
+    if (settings.shopName) appConfig.shopName = settings.shopName;
+    if (settings.shopSlug) appConfig.shopSlug = settings.shopSlug;
+
     saveConfig();
 
     if (typeof settings.autoLaunch === 'boolean') {
       updateAutoLaunch(settings.autoLaunch);
     }
 
-    return { success: true };
+    return { success: true, config: { ...appConfig } };
   });
 }
 

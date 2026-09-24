@@ -29,9 +29,27 @@ export default function KioskLiveTokenPage() {
   const jobId = params?.jobId as string;
 
   const [job, setJob] = useState<Job | null>(null);
+  const [shop, setShop] = useState<{ id?: string; name?: string } | null>(null);
   const [positionAhead, setPositionAhead] = useState(0);
   const [loading, setLoading] = useState(true);
   const [hasCelebrated, setHasCelebrated] = useState(false);
+
+  // Restore shop context
+  useEffect(() => {
+    const cached = sessionStorage.getItem('qp_shop_context');
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        if (parsed?.name) setShop(parsed);
+      } catch (e) {}
+    }
+    fetch(`/api/shops/${shopSlug}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d?.shop) setShop(d.shop);
+      })
+      .catch(() => {});
+  }, [shopSlug]);
 
   // Initial fetch
   useEffect(() => {
@@ -151,8 +169,9 @@ export default function KioskLiveTokenPage() {
   return (
     <div className="min-h-screen bg-[#fafaf7] flex flex-col justify-between pb-16">
       <HeaderBar
-        shopName="Shree Ganesh Xerox"
+        shopName={shop?.name || 'QuickPrint Counter'}
         counterInfo="Live Token Chit"
+        backHref={`/kiosk/${shopSlug}`}
       />
 
       <main className="max-w-xl mx-auto w-full px-4 pt-20 flex-1 flex flex-col gap-4">

@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('quickprintApi', {
   },
 
   // Configuration & Preferences
+  getConfig: () => ipcRenderer.invoke('settings-get-config'),
   updatePricing: (pricing) => ipcRenderer.invoke('settings-update-pricing', pricing),
   saveSettings: (settings) => ipcRenderer.invoke('settings-save', settings),
 

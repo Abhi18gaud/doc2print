@@ -44,11 +44,14 @@ export default function ShopTvQueueDisplay() {
   useEffect(() => {
     async function loadShopAndJobs() {
       try {
-        const { data: shops } = await supabase
-          .from('shops')
-          .select('id, name, address, qr_code_slug')
-          .or(`qr_code_slug.eq.${shopSlug},id.eq.${shopSlug}`)
-          .limit(1);
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(shopSlug);
+        let shopQuery = supabase.from('shops').select('id, name, address, qr_code_slug');
+        if (isUuid) {
+          shopQuery = shopQuery.eq('id', shopSlug);
+        } else {
+          shopQuery = shopQuery.eq('qr_code_slug', shopSlug);
+        }
+        const { data: shops } = await shopQuery.limit(1);
 
         let targetShopId = '';
         if (shops && shops.length > 0) {

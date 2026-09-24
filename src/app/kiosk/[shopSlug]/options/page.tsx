@@ -41,7 +41,7 @@ export default function KioskOptionsPage() {
   const [pageSelection, setPageSelection] = useState<'all' | 'custom'>('all');
   const [customPagesInput, setCustomPagesInput] = useState('');
 
-  // Load session storage data
+  // Load session storage data & shop details
   useEffect(() => {
     const storedName = sessionStorage.getItem('qp_file_name');
     const storedPages = sessionStorage.getItem('qp_file_pages');
@@ -54,12 +54,22 @@ export default function KioskOptionsPage() {
       setFileSizeStr(`${(bytes / (1024 * 1024)).toFixed(1)} MB`);
     }
 
+    // 1. Immediately restore cached shop if available
+    const cachedShop = sessionStorage.getItem('qp_shop_context');
+    if (cachedShop) {
+      try {
+        const parsed = JSON.parse(cachedShop);
+        if (parsed?.id) setShop(parsed);
+      } catch (e) {}
+    }
+
     async function loadShop() {
       try {
         const res = await fetch(`/api/shops/${shopSlug}`);
         if (res.ok) {
           const data = await res.json();
           setShop(data.shop);
+          sessionStorage.setItem('qp_shop_context', JSON.stringify(data.shop));
         }
       } catch (e) {
         console.error('Error fetching shop:', e);

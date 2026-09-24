@@ -65,12 +65,22 @@ export default function KioskCheckoutPage() {
     if (storedPages) setPages(parseInt(storedPages, 10) || 1);
     if (storedPrice) setPrice(parseFloat(storedPrice) || 2.0);
 
+    // 1. Immediately restore cached shop if available
+    const cachedShop = sessionStorage.getItem('qp_shop_context');
+    if (cachedShop) {
+      try {
+        const parsed = JSON.parse(cachedShop);
+        if (parsed?.id) setShop(parsed);
+      } catch (e) {}
+    }
+
     async function loadShop() {
       try {
         const res = await fetch(`/api/shops/${shopSlug}`);
         if (res.ok) {
           const data = await res.json();
           setShop(data.shop);
+          sessionStorage.setItem('qp_shop_context', JSON.stringify(data.shop));
         }
       } catch (err) {
         console.error('Error fetching shop:', err);
@@ -84,8 +94,35 @@ export default function KioskCheckoutPage() {
     setError(null);
 
     try {
-      if (!shop?.id) {
-        throw new Error('Shop information is missing. Please refresh.');
+      let activeShop = shop;
+      if (!activeShop?.id) {
+        const cached = sessionStorage.getItem('qp_shop_context');
+        if (cached) {
+          try {
+            const parsed = JSON.parse(cached);
+            if (parsed?.id) activeShop = parsed;
+          } catch (e) {}
+        }
+      }
+      if (!activeShop?.id) {
+        try {
+          const res = await fetch(`/api/shops/${shopSlug}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.shop?.id) {
+              activeShop = data.shop;
+              setShop(data.shop);
+              sessionStorage.setItem('qp_shop_context', JSON.stringify(data.shop));
+            }
+          }
+        } catch (fetchErr) {
+          console.error('Emergency shop fetch failed:', fetchErr);
+        }
+      }
+
+      const effectiveShopId = activeShop?.id || shopSlug;
+      if (!effectiveShopId) {
+        throw new Error('This shop is currently offline or unreachable. Please scan the QR code again.');
       }
 
       // Reconstruct file from sessionStorage or create placeholder
@@ -107,7 +144,7 @@ export default function KioskCheckoutPage() {
       // 1. Prepare FormData
       const formData = new FormData();
       formData.append('file', fileToSend);
-      formData.append('shop_id', shop.id);
+      formData.append('shop_id', effectiveShopId);
       formData.append('pages', String(pages));
       formData.append('copies', String(copies));
       formData.append('paper_size', paperSize);

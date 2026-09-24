@@ -58,7 +58,7 @@
         <div class="shop-avatar" id="shopAvatar">QP</div>
         <div class="shop-meta">
           <h2 class="shop-name" id="shopNameDisplay">Loading Shop...</h2>
-          <span class="shop-slug" id="shopSlugDisplay">quickprint.in/kiosk/...</span>
+          <span class="shop-slug" id="shopSlugDisplay">doc2print.vercel.app/kiosk/...</span>
         </div>
       </div>
 
@@ -283,7 +283,7 @@
               Open this URL on your shop's wall-mounted Smart TV, Android TV, or second monitor:
             </p>
             <div style="display:flex; gap:10px; align-items:center; margin-bottom:16px;">
-              <input type="text" class="text-input" id="tvDisplayUrlInput" readonly style="font-family:monospace; font-weight:700; color:var(--primary); background:var(--bg-subtle);" value="https://quickprint.in/tv/counter">
+              <input type="text" class="text-input" id="tvDisplayUrlInput" readonly style="font-family:monospace; font-weight:700; color:var(--primary); background:var(--bg-subtle);" value="https://doc2print.vercel.app/tv/counter">
               <button class="btn btn-secondary btn-sm" id="btnCopyTvUrl">📋 Copy Link</button>
               <button class="btn btn-secondary btn-sm" id="btnOpenTvBrowser">🌐 Open in Browser</button>
             </div>
@@ -327,7 +327,7 @@
                 <strong style="color:var(--text-primary); font-size:13px; display:block; margin-bottom:8px;">Method 2: Smart TV / FireStick / Android TV</strong>
                 <ol style="padding-left:18px; font-size:12px; color:var(--text-secondary); line-height:1.7;">
                   <li>Turn on your Smart TV and open its built-in Web Browser.</li>
-                  <li>Type your shop's TV URL: <code style="color:var(--primary); font-weight:700;" id="tvSmartTvUrl">quickprint.in/tv/...</code></li>
+                  <li>Type your shop's TV URL: <code style="color:var(--primary); font-weight:700;" id="tvSmartTvUrl">doc2print.vercel.app/tv/...</code></li>
                   <li>Bookmark the page and press fullscreen on TV remote.</li>
                   <li>It updates automatically via Wi-Fi with instant sound alerts when prints finish!</li>
                 </ol>
@@ -519,15 +519,15 @@
           </div>
 
           <div class="settings-group">
-            <h3>Shop Identity & URLs</h3>
+            <h3>Shop Profile & Kiosk URL</h3>
             <div class="setting-item vertical">
               <label>Shop Public Name</label>
               <input type="text" class="text-input" id="cfgShopName" placeholder="e.g. Metro Xerox & Cyber Cafe">
             </div>
             <div class="setting-item vertical">
-              <label>Shop URL Slug (Kiosk link)</label>
+              <label>Shop URL Slug (Customer Kiosk)</label>
               <div class="input-slug">
-                <span>quickprint.in/kiosk/</span>
+                <span id="cfgDomainPrefix">doc2print.vercel.app/kiosk/</span>
                 <input type="text" class="text-input" id="cfgShopSlug" placeholder="metro-xerox">
               </div>
             </div>
@@ -609,10 +609,10 @@
       <div class="modal-body text-center">
         <p class="qr-instruction">Display this on your counter or print it as a standee for customers to scan & upload documents.</p>
         <div class="qr-display-box" id="qrContainer" style="background:#FFFFFF; padding:16px; border-radius:12px; border:2px solid var(--border-strong); display:inline-block; margin-bottom:14px;">
-          <img id="qrImageDisplay" src="https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=4&data=https://quickprint.in/kiosk/counter" alt="Customer Scan QR Code" style="width:220px; height:220px; display:block; border-radius:4px;">
+          <img id="qrImageDisplay" src="https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=4&data=https://doc2print.vercel.app/kiosk/counter" alt="Customer Scan QR Code" style="width:220px; height:220px; display:block; border-radius:4px;">
         </div>
         <div class="qr-url-badge" id="qrUrlBadge" style="font-family:monospace; font-weight:700; color:var(--primary); font-size:13px; background:var(--bg-subtle); padding:8px 14px; border-radius:6px; border:1px solid var(--border-subtle); word-break:break-all;">
-          https://quickprint.in/kiosk/counter
+          https://doc2print.vercel.app/kiosk/counter
         </div>
       </div>
       <div class="modal-footer">

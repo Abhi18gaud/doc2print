@@ -1,0 +1,7 @@
+{
+  "appUrl": "https://doc2print.vercel.app",
+  "shopSlug": "mahadev-printer-shop",
+  "autoPrintEnabled": true,
+  "autoLaunch": true,
+  "soundAlert": true
+}

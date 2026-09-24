@@ -14,6 +14,7 @@ import {
   ShieldCheck,
   Printer,
   ChevronRight,
+  AlertCircle,
 } from 'lucide-react';
 import { HeaderBar } from '@/components/HeaderBar';
 import { TicketCard, TicketPerforation } from '@/components/TicketCard';
@@ -39,8 +40,20 @@ export default function KioskUploadPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Load shop data
+  // Load shop data with sessionStorage caching & validation
   useEffect(() => {
+    // 1. Immediately restore cached shop if matching to avoid any blank flicker
+    const cached = sessionStorage.getItem('qp_shop_context');
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        if (parsed?.id && (parsed.qr_code_slug === shopSlug || parsed.id === shopSlug)) {
+          setShop(parsed);
+          setLoadingShop(false);
+        }
+      } catch (e) {}
+    }
+
     async function loadShop() {
       try {
         const res = await fetch(`/api/shops/${shopSlug}`);
@@ -48,6 +61,13 @@ export default function KioskUploadPage() {
           const data = await res.json();
           setShop(data.shop);
           setIsOnline(data.isOnline ?? true);
+          sessionStorage.setItem('qp_shop_context', JSON.stringify(data.shop));
+        } else if (res.status === 404) {
+          // Only clear if no matching cached shop
+          const stillCached = sessionStorage.getItem('qp_shop_context');
+          if (!stillCached) {
+            setShop(null);
+          }
         }
       } catch (err) {
         console.error('Failed to load shop details:', err);
@@ -120,6 +140,34 @@ export default function KioskUploadPage() {
     duplex: false,
     priceConfig: shop?.price_config || DEFAULT_PRICE_CONFIG,
   });
+
+  if (!loadingShop && !shop) {
+    return (
+      <div className="min-h-screen bg-[#fafaf7] flex flex-col items-center justify-center p-4">
+        <TicketCard className="max-w-md w-full p-6 text-center">
+          <AlertCircle className="w-10 h-10 text-[#ba1a1a] mx-auto mb-2" />
+          <h2 className="text-[18px] font-bold text-[#1c1b1f]">Shop Unavailable</h2>
+          <p className="text-[13px] text-[#6b6966] mt-1 mb-5">
+            This QR code is invalid or this print counter is currently offline.
+          </p>
+          <div className="flex flex-col gap-2">
+            <button
+              onClick={() => window.location.reload()}
+              className="w-full h-11 rounded bg-[#ff5a1f] text-white font-bold text-[14px] btn-tactile"
+            >
+              Try Again
+            </button>
+            <button
+              onClick={() => router.push('/customer')}
+              className="w-full h-11 rounded bg-[#f4f4f1] text-[#1c1b1f] font-bold text-[14px] border border-[#e6e5df]"
+            >
+              Scan QR Again
+            </button>
+          </div>
+        </TicketCard>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#fafaf7] flex flex-col justify-between pb-28">
