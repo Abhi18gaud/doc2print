@@ -725,6 +725,7 @@ function registerIpcHandlers() {
     try {
       const printerName = options.printerName || appConfig.defaultPrinter || 'Microsoft Print to PDF';
       const fileUrl = options.fileUrl || job.file_url;
+      const copies = Math.max(1, Number(options.copies || job.copies || 1));
       const rawPaper = options.paperSize || job.paper_size || 'A4';
       const paperSize = rawPaper.split(' + ')[0].toUpperCase();
       const duplex = options.duplex ?? job.duplex ?? false;
@@ -745,6 +746,49 @@ function registerIpcHandlers() {
       await downloadRemoteFile(fileUrl, tempFilePath);
       console.log(`[SPOOLER] Spool file downloaded: ${tempFilePath}`);
 
+      let printableFilePath = tempFilePath;
+      const cleanExt = ext.toLowerCase();
+
+      // Convert images (jpg, png, etc.) to standard A4 PDF for native physical spooling
+      if (['jpg', 'jpeg', 'png'].includes(cleanExt)) {
+        try {
+          const { PDFDocument } = require('pdf-lib');
+          const imageBytes = fs.readFileSync(tempFilePath);
+          const pdfDoc = await PDFDocument.create();
+          let embeddedImage;
+          if (cleanExt === 'png') {
+            embeddedImage = await pdfDoc.embedPng(imageBytes);
+          } else {
+            embeddedImage = await pdfDoc.embedJpg(imageBytes);
+          }
+          // A4 dimensions in points: 595.28 x 841.89
+          const a4Width = 595.28;
+          const a4Height = 841.89;
+          const page = pdfDoc.addPage([a4Width, a4Height]);
+          const margin = 36; // 0.5 inch margins
+          const maxWidth = a4Width - (margin * 2);
+          const maxHeight = a4Height - (margin * 2);
+          const imgDims = embeddedImage.scaleToFit(maxWidth, maxHeight);
+          const x = margin + (maxWidth - imgDims.width) / 2;
+          const y = margin + (maxHeight - imgDims.height) / 2;
+
+          page.drawImage(embeddedImage, {
+            x,
+            y,
+            width: imgDims.width,
+            height: imgDims.height,
+          });
+
+          const convertedPdfPath = path.join(tempDir, `print_${Date.now()}.pdf`);
+          const pdfBytes = await pdfDoc.save();
+          fs.writeFileSync(convertedPdfPath, pdfBytes);
+          printableFilePath = convertedPdfPath;
+          console.log(`[SPOOLER] Converted ${cleanExt} image to printable PDF: ${printableFilePath}`);
+        } catch (imgErr) {
+          console.warn('[SPOOLER] Image to PDF conversion fallback:', imgErr.message);
+        }
+      }
+
       // Spool to Windows printer via pdf-to-printer
       let ptp = null;
       try {
@@ -753,7 +797,7 @@ function registerIpcHandlers() {
         console.warn('pdf-to-printer load error:', e.message);
       }
 
-      if (ptp && process.platform === 'win32') {
+      if (ptp && process.platform === 'win32' && printableFilePath.toLowerCase().endsWith('.pdf')) {
         const ptpOpts = {
           printer: printerName,
           copies,
@@ -762,10 +806,10 @@ function registerIpcHandlers() {
         if (duplex) ptpOpts.side = 'duplex';
 
         console.log('[SPOOLER] Sending to physical printer via pdf-to-printer:', ptpOpts);
-        await ptp.print(tempFilePath, ptpOpts);
+        await ptp.print(printableFilePath, ptpOpts);
         console.log('[SPOOLER] Spooler accepted job successfully.');
       } else if (process.platform === 'win32') {
-        const psCmd = `powershell -NoProfile -Command "Start-Process -FilePath '${tempFilePath.replace(/'/g, "''")}' -Verb PrintTo -ArgumentList '\"${printerName}\"' -PassThru | Wait-Process -Timeout 15"`;
+        const psCmd = `powershell -NoProfile -Command "Start-Process -FilePath '${printableFilePath.replace(/'/g, "''")}' -Verb PrintTo -ArgumentList '\"${printerName}\"' -PassThru | Wait-Process -Timeout 15"`;
         await new Promise((resolve) => {
           exec(psCmd, (err) => {
             if (err) console.warn('Native PrintTo note:', err.message);
@@ -774,10 +818,13 @@ function registerIpcHandlers() {
         });
       }
 
-      // Clean up temp file safely
+      // Clean up temp files safely
       setTimeout(() => {
         try { fs.unlinkSync(tempFilePath); } catch (e) {}
-      }, 5000);
+        if (printableFilePath !== tempFilePath) {
+          try { fs.unlinkSync(printableFilePath); } catch (e) {}
+        }
+      }, 8000);
 
       // Step 2: Mark print completed in database
       const completedAt = new Date().toISOString();

@@ -620,7 +620,7 @@
 
   // Render Queue Cards
   function renderQueue() {
-    const pendingJobs = activeJobs.filter((j) => j.status === 'pending' || j.status === 'paid');
+    const pendingJobs = activeJobs.filter((j) => j.status === 'pending' || j.status === 'printing' || j.status === 'paid');
     const paidJobs = activeJobs.filter((j) => j.payment_status === 'paid');
     const cashJobs = activeJobs.filter((j) => j.payment_status === 'pending' || j.payment_status === 'cash');
 
@@ -669,6 +669,7 @@
       const pages = job.page_count || 1;
       const totalPages = pages * copies;
       const colorMode = job.color_mode === 'color' ? 'Full Color' : 'B&W';
+      const duplexMode = job.duplex ? 'Duplex (Both Sides)' : 'Single Sided';
       const rawPaper = job.paper_size || 'A4';
       const isSpiral = job.binding || rawPaper.includes('Spiral');
       const isStapled = job.stapling || rawPaper.includes('Staple');
@@ -783,8 +784,10 @@
     if (card) card.classList.add('printing');
     job.status = 'printing';
     renderQueue();
+    renderHistoryTable();
 
-    showToast(`Sending Token ${job.token_number || ''} to ${defaultPrinterName}...`, 'info');
+    const targetPrinter = defaultPrinterName || 'Default Printer';
+    showToast(`Sending Token ${job.token_number || ''} to ${targetPrinter}...`, 'info');
 
     try {
       const res = await window.quickprintApi.printJob(job.id, {
@@ -795,21 +798,24 @@
         paperSize: (job.paper_size || 'A4').split(' + ')[0],
       });
 
-      if (res.success) {
+      if (res && res.success) {
         showToast(`Token ${job.token_number || ''} spooled & verified completed!`, 'success');
         job.status = 'completed';
         renderQueue();
+        renderHistoryTable();
         updateFinancials();
       } else {
         job.status = 'failed';
-        job.failure_reason = res.error || 'Spooler error';
+        job.failure_reason = res?.error || 'Spooler error';
         renderQueue();
-        showToast(`Spool error: ${res.error || 'Failed to print'}`, 'danger');
+        renderHistoryTable();
+        showToast(`Spool error: ${res?.error || 'Failed to print'}`, 'danger');
       }
     } catch (e) {
       job.status = 'failed';
       job.failure_reason = e.message;
       renderQueue();
+      renderHistoryTable();
       showToast(`Printer driver error: ${e.message}`, 'danger');
     } finally {
       if (card) card.classList.remove('printing');
@@ -920,10 +926,25 @@
     });
 
     document.querySelectorAll('.btn-reprint').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        const id = e.target.getAttribute('data-id');
+      btn.addEventListener('click', async (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
         const job = activeJobs.find((j) => j.id === id);
-        if (job) executePrint(job);
+        if (job) {
+          const originalText = e.currentTarget.textContent;
+          e.currentTarget.disabled = true;
+          e.currentTarget.textContent = '⏳ Printing...';
+          try {
+            await executePrint(job);
+            e.currentTarget.textContent = '✓ Spooled';
+            setTimeout(() => {
+              e.currentTarget.disabled = false;
+              e.currentTarget.textContent = originalText;
+            }, 3000);
+          } catch (err) {
+            e.currentTarget.disabled = false;
+            e.currentTarget.textContent = originalText;
+          }
+        }
       });
     });
   }

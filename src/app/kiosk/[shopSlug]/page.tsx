@@ -9,6 +9,7 @@ import {
   FileText,
   Trash2,
   RefreshCw,
+  Plus,
   Lock,
   ArrowRight,
   ShieldCheck,
@@ -39,6 +40,7 @@ export default function KioskUploadPage() {
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
+  const addMoreInputRef = useRef<HTMLInputElement | null>(null);
 
   // Load shop data with sessionStorage caching & validation
   useEffect(() => {
@@ -78,31 +80,88 @@ export default function KioskUploadPage() {
     loadShop();
   }, [shopSlug]);
 
-  const handleFileChange = async (selectedFile: File | null) => {
-    if (!selectedFile) return;
-    setFile(selectedFile);
+  const mergeFilesToPdf = async (fileList: File[]): Promise<File> => {
+    const { PDFDocument } = await import('pdf-lib');
+    const pdfDoc = await PDFDocument.create();
+
+    for (const f of fileList) {
+      const buffer = await f.arrayBuffer();
+      const cleanName = f.name.toLowerCase();
+
+      if (cleanName.endsWith('.pdf')) {
+        const donorPdf = await PDFDocument.load(buffer, { ignoreEncryption: true });
+        const copiedPages = await pdfDoc.copyPages(donorPdf, donorPdf.getPageIndices());
+        copiedPages.forEach((p) => pdfDoc.addPage(p));
+      } else if (cleanName.endsWith('.png')) {
+        const pngImage = await pdfDoc.embedPng(buffer);
+        const a4Width = 595.28;
+        const a4Height = 841.89;
+        const page = pdfDoc.addPage([a4Width, a4Height]);
+        const margin = 36;
+        const dims = pngImage.scaleToFit(a4Width - margin * 2, a4Height - margin * 2);
+        page.drawImage(pngImage, {
+          x: margin + (a4Width - margin * 2 - dims.width) / 2,
+          y: margin + (a4Height - margin * 2 - dims.height) / 2,
+          width: dims.width,
+          height: dims.height,
+        });
+      } else {
+        // JPG, JPEG, WEBP, etc.
+        const jpgImage = await pdfDoc.embedJpg(buffer);
+        const a4Width = 595.28;
+        const a4Height = 841.89;
+        const page = pdfDoc.addPage([a4Width, a4Height]);
+        const margin = 36;
+        const dims = jpgImage.scaleToFit(a4Width - margin * 2, a4Height - margin * 2);
+        page.drawImage(jpgImage, {
+          x: margin + (a4Width - margin * 2 - dims.width) / 2,
+          y: margin + (a4Height - margin * 2 - dims.height) / 2,
+          width: dims.width,
+          height: dims.height,
+        });
+      }
+    }
+
+    const mergedBytes = await pdfDoc.save();
+    return new File([mergedBytes as unknown as BlobPart], `Scanned_Document_${fileList.length}_Pages.pdf`, {
+      type: 'application/pdf',
+    });
+  };
+
+  const handleFilesChange = async (incoming: FileList | File[] | null, isAppend = false) => {
+    if (!incoming || incoming.length === 0) return;
+    const incomingArray = Array.from(incoming);
+
     setIsAnalyzing(true);
     try {
-      const result = await inspectUploadedFile(selectedFile);
+      let finalFile: File;
+      if (isAppend && file) {
+        finalFile = await mergeFilesToPdf([file, ...incomingArray]);
+      } else if (incomingArray.length > 1) {
+        finalFile = await mergeFilesToPdf(incomingArray);
+      } else {
+        finalFile = incomingArray[0];
+      }
+
+      setFile(finalFile);
+      const result = await inspectUploadedFile(finalFile);
       setAnalysis(result);
 
-      // Store file in window / sessionStorage temporarily for next step
-      // Convert to base64 or keep in IndexedDB/global state
       const reader = new FileReader();
       reader.onload = () => {
         try {
-          sessionStorage.setItem('qp_file_name', selectedFile.name);
-          sessionStorage.setItem('qp_file_type', selectedFile.type);
+          sessionStorage.setItem('qp_file_name', finalFile.name);
+          sessionStorage.setItem('qp_file_type', finalFile.type);
           sessionStorage.setItem('qp_file_pages', String(result.pages));
-          sessionStorage.setItem('qp_file_size', String(selectedFile.size));
+          sessionStorage.setItem('qp_file_size', String(finalFile.size));
           sessionStorage.setItem('qp_file_data', reader.result as string);
         } catch (e) {
           console.warn('Storage quota warning, keeping in-memory:', e);
         }
       };
-      reader.readAsDataURL(selectedFile);
+      reader.readAsDataURL(finalFile);
     } catch (err) {
-      console.error('Failed to analyze file:', err);
+      console.error('Failed to process uploaded files:', err);
     } finally {
       setIsAnalyzing(false);
     }
@@ -122,8 +181,8 @@ export default function KioskUploadPage() {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleFileChange(e.dataTransfer.files[0]);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleFilesChange(e.dataTransfer.files, false);
     }
   };
 
@@ -242,16 +301,26 @@ export default function KioskUploadPage() {
           ref={fileInputRef}
           type="file"
           accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp"
+          multiple
           className="hidden"
-          onChange={(e) => handleFileChange(e.target.files?.[0] || null)}
+          onChange={(e) => handleFilesChange(e.target.files, false)}
         />
         <input
           ref={cameraInputRef}
           type="file"
           accept="image/*"
           capture="environment"
+          multiple
           className="hidden"
-          onChange={(e) => handleFileChange(e.target.files?.[0] || null)}
+          onChange={(e) => handleFilesChange(e.target.files, false)}
+        />
+        <input
+          ref={addMoreInputRef}
+          type="file"
+          accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,image/*"
+          multiple
+          className="hidden"
+          onChange={(e) => handleFilesChange(e.target.files, true)}
         />
 
         {/* Primary High-Clarity Upload Box */}
@@ -354,7 +423,16 @@ export default function KioskUploadPage() {
                     </span>
                   </div>
 
-                  <div className="flex items-center gap-4 mt-2.5 pt-2 border-t border-[#f4f4f1]">
+                  <div className="flex items-center gap-3 mt-2.5 pt-2 border-t border-[#f4f4f1] flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => addMoreInputRef.current?.click()}
+                      className="text-[12px] font-semibold text-[#1c1b1f] hover:text-[#ff5a1f] flex items-center gap-1 transition-colors px-2 py-1 rounded bg-[#f4f4f1] hover:bg-[#e8e8e5]"
+                      title="Add more scanned pages or images to this document"
+                    >
+                      <Plus className="w-3.5 h-3.5 text-[#ff5a1f]" />
+                      <span>+ Add More Pages</span>
+                    </button>
                     <button
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
@@ -370,7 +448,7 @@ export default function KioskUploadPage() {
                         setAnalysis(null);
                         sessionStorage.clear();
                       }}
-                      className="text-[12px] font-semibold text-[#ba1a1a] hover:text-[#93000a] flex items-center gap-1 transition-colors"
+                      className="text-[12px] font-semibold text-[#ba1a1a] hover:text-[#93000a] flex items-center gap-1 transition-colors ml-auto"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                       <span>Remove</span>
