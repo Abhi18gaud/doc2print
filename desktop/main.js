@@ -789,6 +789,57 @@ function registerIpcHandlers() {
         }
       }
 
+      // Page-by-page / Selective page reprint support
+      if ((options.pageRange || options.pages) && printableFilePath.toLowerCase().endsWith('.pdf')) {
+        try {
+          const { PDFDocument } = require('pdf-lib');
+          const sourceBytes = fs.readFileSync(printableFilePath);
+          const srcDoc = await PDFDocument.load(sourceBytes, { ignoreEncryption: true });
+          const totalSrcPages = srcDoc.getPageCount();
+
+          let targetIndices = [];
+          if (Array.isArray(options.pages)) {
+            targetIndices = options.pages.map((p) => Number(p) - 1);
+          } else if (typeof options.pageRange === 'string') {
+            const rawRange = options.pageRange.trim();
+            if (rawRange.endsWith('-')) {
+              // e.g. "3-" means page 3 to end
+              const start = parseInt(rawRange.slice(0, -1), 10);
+              for (let i = start; i <= totalSrcPages; i++) {
+                targetIndices.push(i - 1);
+              }
+            } else if (rawRange.includes('-')) {
+              // e.g. "3-5"
+              const [start, end] = rawRange.split('-').map(Number);
+              for (let i = start; i <= end; i++) {
+                targetIndices.push(i - 1);
+              }
+            } else {
+              // e.g. "3"
+              const single = parseInt(rawRange, 10);
+              if (!isNaN(single)) targetIndices.push(single - 1);
+            }
+          }
+
+          // Filter valid indices
+          targetIndices = targetIndices.filter((idx) => idx >= 0 && idx < totalSrcPages);
+
+          if (targetIndices.length > 0) {
+            const slicedDoc = await PDFDocument.create();
+            const copied = await slicedDoc.copyPages(srcDoc, targetIndices);
+            copied.forEach((p) => slicedDoc.addPage(p));
+            const slicedBytes = await slicedDoc.save();
+
+            const slicedFilePath = path.join(tempDir, `sliced_${Date.now()}.pdf`);
+            fs.writeFileSync(slicedFilePath, slicedBytes);
+            printableFilePath = slicedFilePath;
+            console.log(`[SPOOLER] Sliced PDF to target pages (${targetIndices.map((i) => i + 1).join(', ')}): ${printableFilePath}`);
+          }
+        } catch (sliceErr) {
+          console.warn('[SPOOLER] Page range slicing note:', sliceErr.message);
+        }
+      }
+
       // Spool to Windows printer via pdf-to-printer
       let ptp = null;
       try {

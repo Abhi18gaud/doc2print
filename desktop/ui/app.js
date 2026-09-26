@@ -14,6 +14,8 @@
   let autoPrintEnabled = true;
   let ordersPaused = false;
   let currentFilter = 'all';
+  const expandedJobs = new Set();
+  const jobPagesStatus = {};
 
   // --- DOM REFS ---
   const appShell = document.getElementById('appShell');
@@ -675,54 +677,128 @@
       const isStapled = job.stapling || rawPaper.includes('Staple');
       const basePaper = rawPaper.split(' + ')[0];
       const amount = (job.total_amount || 0).toFixed(2);
+      const isExpanded = expandedJobs.has(job.id);
+
+      if (!jobPagesStatus[job.id]) {
+        jobPagesStatus[job.id] = {};
+        for (let p = 1; p <= pages; p++) {
+          jobPagesStatus[job.id][p] = isCompleted ? 'completed' : 'pending';
+        }
+      }
+
+      // Generate page cells HTML
+      let pageCellsHtml = '';
+      for (let p = 1; p <= pages; p++) {
+        const pStatus = jobPagesStatus[job.id][p] || (isCompleted ? 'completed' : 'pending');
+        let badgeHtml = '<span class="page-badge grey">Pending</span>';
+        if (pStatus === 'completed') badgeHtml = '<span class="page-badge green">✓ Printed</span>';
+        else if (pStatus === 'printing') badgeHtml = '<span class="page-badge blue">⏳ Printing...</span>';
+        else if (pStatus === 'failed') badgeHtml = '<span class="page-badge red">⚠️ Jammed / Error</span>';
+
+        pageCellsHtml += `
+          <div class="page-cell">
+            <div class="page-cell-header">
+              <span class="page-num">Page ${p}</span>
+              ${badgeHtml}
+            </div>
+            <div class="page-cell-actions">
+              <button class="btn-page-action btn-reprint-single-page" data-id="${job.id}" data-page="${p}">
+                🔄 Reprint Page ${p}
+              </button>
+              ${
+                p < pages
+                  ? `<button class="btn-page-action resume btn-resume-from-page" data-id="${job.id}" data-page="${p}">
+                       ▶️ Resume From Page ${p}
+                     </button>`
+                  : ''
+              }
+            </div>
+          </div>
+        `;
+      }
 
       card.innerHTML = `
-        <div class="order-card-left">
-          <div class="token-badge-box">
-            <span class="token-tag">${tokenDisplay}</span>
-            <span class="token-time">${timeStr}</span>
+        <div class="order-card-main">
+          <div class="order-card-left">
+            <div class="token-badge-box">
+              <span class="token-tag">${tokenDisplay}</span>
+              <span class="token-time">${timeStr}</span>
+            </div>
+
+            <div class="order-details-col">
+              <div class="order-customer-row">
+                <span class="customer-name">${job.customer_name || 'Walk-in Customer'}</span>
+                <span class="customer-phone">${job.customer_phone || ''}</span>
+              </div>
+              <div class="order-specs-chips">
+                <span class="spec-chip ${job.color_mode === 'color' ? 'color' : 'bw'}">${colorMode}</span>
+                <span class="spec-chip">${pages} Pages × ${copies} Copy</span>
+                <span class="spec-chip">${duplexMode}</span>
+                <span class="spec-chip">${basePaper}</span>
+                ${isSpiral ? '<span class="spec-chip color" style="font-weight:700;">🌀 Spiral Binding</span>' : ''}
+                ${isStapled ? '<span class="spec-chip" style="background:#eff6ff; color:#1d4ed8; border-color:#bfdbfe; font-weight:700;">📎 Corner Staple</span>' : ''}
+              </div>
+            </div>
           </div>
 
-          <div class="order-details-col">
-            <div class="order-customer-row">
-              <span class="customer-name">${job.customer_name || 'Walk-in Customer'}</span>
-              <span class="customer-phone">${job.customer_phone || ''}</span>
+          <div class="order-card-right">
+            <div class="payment-status-block">
+              <div class="payment-amount">₹${amount}</div>
+              <span class="payment-badge ${isPaid ? 'paid' : 'cash'}">
+                ${isPaid ? 'PAID UPI ✓' : 'COLLECT CASH ⚠️'}
+              </span>
             </div>
-            <div class="order-specs-chips">
-              <span class="spec-chip ${job.color_mode === 'color' ? 'color' : 'bw'}">${colorMode}</span>
-              <span class="spec-chip">${pages} Pages × ${copies} Copy</span>
-              <span class="spec-chip">${duplexMode}</span>
-              <span class="spec-chip">${basePaper}</span>
-              ${isSpiral ? '<span class="spec-chip color" style="font-weight:700;">🌀 Spiral Binding</span>' : ''}
-              ${isStapled ? '<span class="spec-chip" style="background:#eff6ff; color:#1d4ed8; border-color:#bfdbfe; font-weight:700;">📎 Corner Staple</span>' : ''}
+
+            <div class="order-actions">
+              ${
+                isCompleted
+                  ? `<span class="badge-chip green" style="padding: 6px 12px; font-weight: 700; border-radius: 6px;">✓ PRINT COMPLETED</span>
+                     <button class="btn btn-secondary btn-sm btn-print-job" data-id="${job.id}" title="Send duplicate to printer">🔄 Reprint All</button>`
+                  : isPrinting
+                  ? `<button class="btn btn-primary btn-sm" disabled style="opacity: 0.85;">⏳ Printing to Spooler...</button>`
+                  : job.status === 'failed'
+                  ? `<span class="badge-chip red" style="padding: 6px 12px; font-weight: 700; border-radius: 6px;" title="${job.failure_reason || 'Print failure'}">⚠️ PRINT FAILED</span>
+                     <button class="btn btn-primary btn-sm btn-print-job" data-id="${job.id}">🔄 Retry All</button>`
+                  : !isPaid
+                  ? `<button class="btn btn-primary btn-sm btn-confirm-cash" data-id="${job.id}">💵 Cash Paid & Print</button>`
+                  : `<button class="btn btn-primary btn-sm btn-print-job" data-id="${job.id}">🖨️ Print Now</button>`
+              }
+              <button class="btn btn-secondary btn-sm btn-preview-job" data-id="${job.id}">
+                👁️ Preview
+              </button>
             </div>
           </div>
         </div>
 
-        <div class="order-card-right">
-          <div class="payment-status-block">
-            <div class="payment-amount">₹${amount}</div>
-            <span class="payment-badge ${isPaid ? 'paid' : 'cash'}">
-              ${isPaid ? 'PAID UPI ✓' : 'COLLECT CASH ⚠️'}
+        <div class="order-card-footer">
+          <button class="btn-toggle-pages" data-id="${job.id}">
+            <span>${isExpanded ? '▴ Hide Breakdown' : '▾ 📑 Show Pages Breakdown (' + pages + ' Pages)'}</span>
+          </button>
+          <div style="font-size: 11px; color: var(--text-muted); font-family: monospace;">
+            File: ${job.file_name || 'Document.pdf'}
+          </div>
+        </div>
+
+        <div class="order-pages-drawer ${isExpanded ? '' : 'hidden'}" id="pages-drawer-${job.id}">
+          <div class="drawer-header">
+            <span>📑 Page-by-Page Status & Selective Reprint</span>
+            <span class="badge-chip ${isCompleted ? 'green' : 'blue'}">
+              ${isCompleted ? '✓ All Pages Printed' : `${pages} Total Pages`}
             </span>
           </div>
 
-          <div class="order-actions">
-            ${
-              isCompleted
-                ? `<span class="badge-chip green" style="padding: 6px 12px; font-weight: 700; border-radius: 6px;">✓ PRINT COMPLETED</span>
-                   <button class="btn btn-secondary btn-sm btn-print-job" data-id="${job.id}" title="Send duplicate to printer">🔄 Reprint</button>`
-                : isPrinting
-                ? `<button class="btn btn-primary btn-sm" disabled style="opacity: 0.85;">⏳ Printing to Spooler...</button>`
-                : job.status === 'failed'
-                ? `<span class="badge-chip red" style="padding: 6px 12px; font-weight: 700; border-radius: 6px;" title="${job.failure_reason || 'Print failure'}">⚠️ PRINT FAILED</span>
-                   <button class="btn btn-primary btn-sm btn-print-job" data-id="${job.id}">🔄 Retry Print</button>`
-                : !isPaid
-                ? `<button class="btn btn-primary btn-sm btn-confirm-cash" data-id="${job.id}">💵 Cash Paid & Print</button>`
-                : `<button class="btn btn-primary btn-sm btn-print-job" data-id="${job.id}">🖨️ Print Now</button>`
-            }
-            <button class="btn btn-secondary btn-sm btn-preview-job" data-id="${job.id}">
-              👁️ Preview
+          <div class="pages-grid">
+            ${pageCellsHtml}
+          </div>
+
+          <div class="custom-range-bar">
+            <span>Reprint Range:</span>
+            <span>From Page</span>
+            <input type="number" class="page-num-input" id="range-from-${job.id}" min="1" max="${pages}" value="1" />
+            <span>To Page</span>
+            <input type="number" class="page-num-input" id="range-to-${job.id}" min="1" max="${pages}" value="${pages}" />
+            <button class="btn btn-secondary btn-sm btn-reprint-range" data-id="${job.id}">
+              🖨️ Reprint Specified Range
             </button>
           </div>
         </div>
@@ -731,7 +807,60 @@
       queueCardsList.appendChild(card);
     });
 
-    // Bind action buttons: Print / Reprint / Retry
+    // Toggle pages breakdown drawer
+    document.querySelectorAll('.btn-toggle-pages').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        if (expandedJobs.has(id)) {
+          expandedJobs.delete(id);
+        } else {
+          expandedJobs.add(id);
+        }
+        renderQueue();
+      });
+    });
+
+    // Reprint single page
+    document.querySelectorAll('.btn-reprint-single-page').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        const page = e.currentTarget.getAttribute('data-page');
+        const job = activeJobs.find((j) => j.id === id);
+        if (job) {
+          executePrint(job, { pageRange: String(page) });
+        }
+      });
+    });
+
+    // Resume from page to end
+    document.querySelectorAll('.btn-resume-from-page').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        const page = e.currentTarget.getAttribute('data-page');
+        const job = activeJobs.find((j) => j.id === id);
+        if (job) {
+          const totalP = job.page_count || 1;
+          executePrint(job, { pageRange: `${page}-${totalP}` });
+        }
+      });
+    });
+
+    // Custom range reprint
+    document.querySelectorAll('.btn-reprint-range').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        const job = activeJobs.find((j) => j.id === id);
+        if (!job) return;
+        const totalP = job.page_count || 1;
+        const fromInput = document.getElementById(`range-from-${id}`);
+        const toInput = document.getElementById(`range-to-${id}`);
+        const from = Math.max(1, parseInt(fromInput?.value || '1', 10));
+        const to = Math.min(totalP, Math.max(from, parseInt(toInput?.value || String(totalP), 10)));
+        executePrint(job, { pageRange: `${from}-${to}` });
+      });
+    });
+
+    // Bind action buttons: Print / Reprint / Retry All
     document.querySelectorAll('.btn-print-job').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         const id = e.currentTarget.getAttribute('data-id');
@@ -778,16 +907,40 @@
     });
   }
 
-  // Execute Real Print via physical spooler pipeline
-  async function executePrint(job) {
+  // Execute Real Print via physical spooler pipeline (with page-level support)
+  async function executePrint(job, printOptions = {}) {
     const card = document.getElementById(`job-card-${job.id}`);
     if (card) card.classList.add('printing');
     job.status = 'printing';
+
+    const pages = job.page_count || 1;
+    if (!jobPagesStatus[job.id]) jobPagesStatus[job.id] = {};
+
+    // Determine targeted pages
+    let targetedPages = [];
+    if (printOptions.pageRange) {
+      const rangeStr = String(printOptions.pageRange).trim();
+      if (rangeStr.includes('-')) {
+        const [s, e] = rangeStr.split('-').map(Number);
+        for (let i = s; i <= e; i++) targetedPages.push(i);
+      } else {
+        targetedPages = [Number(rangeStr)];
+      }
+    } else {
+      targetedPages = Array.from({ length: pages }, (_, i) => i + 1);
+    }
+
+    // Mark targeted pages as printing
+    targetedPages.forEach((p) => {
+      jobPagesStatus[job.id][p] = 'printing';
+    });
+
     renderQueue();
     renderHistoryTable();
 
     const targetPrinter = defaultPrinterName || 'Default Printer';
-    showToast(`Sending Token ${job.token_number || ''} to ${targetPrinter}...`, 'info');
+    const rangeLabel = printOptions.pageRange ? ` (Pages ${printOptions.pageRange})` : '';
+    showToast(`Sending Token ${job.token_number || ''}${rangeLabel} to ${targetPrinter}...`, 'info');
 
     try {
       const res = await window.quickprintApi.printJob(job.id, {
@@ -796,15 +949,32 @@
         copies: job.copies || 1,
         duplex: job.duplex,
         paperSize: (job.paper_size || 'A4').split(' + ')[0],
+        pageRange: printOptions.pageRange,
       });
 
       if (res && res.success) {
-        showToast(`Token ${job.token_number || ''} spooled & verified completed!`, 'success');
-        job.status = 'completed';
+        showToast(`Token ${job.token_number || ''}${rangeLabel} spooled & verified completed!`, 'success');
+        targetedPages.forEach((p) => {
+          jobPagesStatus[job.id][p] = 'completed';
+        });
+
+        // Check if all pages completed
+        const allDone = Array.from({ length: pages }, (_, i) => i + 1).every(
+          (p) => jobPagesStatus[job.id][p] === 'completed'
+        );
+        if (allDone) {
+          job.status = 'completed';
+        } else {
+          job.status = 'pending';
+        }
+
         renderQueue();
         renderHistoryTable();
         updateFinancials();
       } else {
+        targetedPages.forEach((p) => {
+          jobPagesStatus[job.id][p] = 'failed';
+        });
         job.status = 'failed';
         job.failure_reason = res?.error || 'Spooler error';
         renderQueue();
@@ -812,6 +982,9 @@
         showToast(`Spool error: ${res?.error || 'Failed to print'}`, 'danger');
       }
     } catch (e) {
+      targetedPages.forEach((p) => {
+        jobPagesStatus[job.id][p] = 'failed';
+      });
       job.status = 'failed';
       job.failure_reason = e.message;
       renderQueue();
