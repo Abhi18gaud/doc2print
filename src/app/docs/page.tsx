@@ -184,39 +184,48 @@ export default function DocsPage() {
           </div>
         </section>
 
-        {/* SECTION 4: VERCEL DEPLOYMENT GUIDE */}
+        {/* SECTION 4: AUTOMATIC UPDATES & SPOOLER RELIABILITY */}
         <section className="bg-white border border-[#E2E8F0] rounded-2xl p-8 shadow-xs flex flex-col gap-6">
           <div className="flex items-center gap-3 border-b border-[#E2E8F0] pb-4">
             <div className="w-10 h-10 rounded-lg bg-[#EFF6FF] text-[#2563EB] flex items-center justify-center font-bold">
               <Zap className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-[20px] font-extrabold text-[#0F172A]">4. Deploying QuickPrint to Vercel</h2>
-              <p className="text-[13px] text-[#64748B]">How to deploy the public web app and customer kiosk to production</p>
+              <h2 className="text-[20px] font-extrabold text-[#0F172A]">4. Automatic Updates & Print Reliability</h2>
+              <p className="text-[13px] text-[#64748B]">Zero-maintenance production releases and uninterrupted queue management</p>
             </div>
           </div>
 
           <div className="space-y-4 text-[13px] text-[#334155] leading-relaxed">
             <p>
-              The Next.js web application powers the marketing website, customer kiosk (<code className="font-mono text-[#0F172A]">/kiosk/[slug]</code>), and the TV display board (<code className="font-mono text-[#0F172A]">/tv/[slug]</code>). To deploy it on Vercel:
+              QuickPrint Counter OS is engineered for continuous shop operations. The system includes built-in update intelligence:
             </p>
-            <ol className="list-decimal pl-5 space-y-2">
-              <li>Push your codebase to a GitHub / GitLab repository.</li>
-              <li>Log in to <a href="https://vercel.com" target="_blank" className="text-[#2563EB] font-bold underline">Vercel.com</a> and click <strong>Add New Project</strong>.</li>
-              <li>Import your QuickPrint repository.</li>
-              <li>Under <strong>Environment Variables</strong>, add the following 4 keys:</li>
-            </ol>
-
-            <div className="bg-[#0F172A] text-white p-4 rounded-xl font-mono text-[12px] space-y-1">
-              <div>NEXT_PUBLIC_SUPABASE_URL = https://iixcylrdqfdxfsldcygm.supabase.co</div>
-              <div>NEXT_PUBLIC_SUPABASE_ANON_KEY = [Your Supabase Anon Key]</div>
-              <div>SUPABASE_SERVICE_ROLE_KEY = [Your Supabase Service Role Key]</div>
-              <div>NEXT_PUBLIC_APP_URL = https://your-domain.vercel.app</div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="border border-[#E2E8F0] p-4 rounded-lg bg-[#F8FAFC]">
+                <strong className="text-[#0F172A] block mb-1">Safe In-App Updates</strong>
+                <p className="text-[12px] text-[#64748B]">
+                  When a new stable release is published, the desktop software detects it automatically. You can download and install updates with a single click in <strong>Settings → Software Updates</strong>.
+                </p>
+              </div>
+              <div className="border border-[#E2E8F0] p-4 rounded-lg bg-[#F8FAFC]">
+                <strong className="text-[#0F172A] block mb-1">Print Protection Guard</strong>
+                <p className="text-[12px] text-[#64748B]">
+                  Updates never restart the Counter OS during an active print job. If documents are printing, the updater safely pauses restart until all active pages are completed.
+                </p>
+              </div>
+              <div className="border border-[#E2E8F0] p-4 rounded-lg bg-[#F8FAFC]">
+                <strong className="text-[#0F172A] block mb-1">Zero Data Loss Migration</strong>
+                <p className="text-[12px] text-[#64748B]">
+                  Upgrading to new versions preserves your shop login, UPI QR credentials, pricing catalog, and printer routing preferences automatically.
+                </p>
+              </div>
+              <div className="border border-[#E2E8F0] p-4 rounded-lg bg-[#F8FAFC]">
+                <strong className="text-[#0F172A] block mb-1">Offline Continuity</strong>
+                <p className="text-[12px] text-[#64748B]">
+                  If your internet connection fluctuates, local counter printing and queuing continue uninterrupted. Update checks fail gracefully without blocking print counters.
+                </p>
+              </div>
             </div>
-
-            <p className="text-[12px] text-[#64748B]">
-              Once deployed, your live URL will be active worldwide, allowing customers to scan and upload from anywhere!
-            </p>
           </div>
         </section>
       </main>

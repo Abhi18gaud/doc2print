@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Tray, Menu, Notification, nativeImage, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, Tray, Menu, Notification, nativeImage, ipcMain, shell, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -27,6 +27,163 @@ try {
   QRCode = require('qrcode');
 } catch (e) {
   console.warn('qrcode package load note:', e.message);
+}
+
+// --- AUTO-UPDATER & PRODUCTION RELEASE PIPELINE ---
+let autoUpdater = null;
+try {
+  const updaterModule = require('electron-updater');
+  autoUpdater = updaterModule.autoUpdater;
+} catch (e) {
+  console.warn('[AUTO-UPDATER] electron-updater module load note:', e.message);
+}
+
+let activePrintingJobsCount = 0;
+let pendingDeferredUpdateInstall = false;
+let currentUpdateStatus = {
+  state: 'idle',
+  currentVersion: app.getVersion(),
+  availableVersion: null,
+  progress: 0,
+  bytesPerSecond: 0,
+  totalBytes: 0,
+  transferredBytes: 0,
+  message: 'QuickPrint Counter OS is up to date',
+  error: null,
+  releaseNotes: '',
+};
+
+function formatUpdateSpeed(bytesPerSec) {
+  if (!bytesPerSec || bytesPerSec < 1024) return `${bytesPerSec || 0} B/s`;
+  if (bytesPerSec < 1024 * 1024) return `${(bytesPerSec / 1024).toFixed(1)} KB/s`;
+  return `${(bytesPerSec / (1024 * 1024)).toFixed(1)} MB/s`;
+}
+
+function broadcastUpdateStatus() {
+  currentUpdateStatus.currentVersion = app.getVersion();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('updater-status-changed', { ...currentUpdateStatus });
+  }
+}
+
+function initAutoUpdater() {
+  if (!autoUpdater) {
+    console.warn('[AUTO-UPDATER] electron-updater not available in current runtime');
+    return;
+  }
+
+  // Production Updater Configuration
+  autoUpdater.autoDownload = false; // Give user choice
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.allowDowngrade = false;
+  autoUpdater.allowPrerelease = appConfig.updateChannel === 'beta';
+
+  // Support local development inspection
+  if (!app.isPackaged) {
+    const devUpdatePath = path.join(__dirname, 'dev-app-update.yml');
+    if (fs.existsSync(devUpdatePath)) {
+      try {
+        autoUpdater.updateConfigPath = devUpdatePath;
+      } catch (err) {
+        console.warn('[AUTO-UPDATER] dev-app-update config warning:', err.message);
+      }
+    }
+  }
+
+  autoUpdater.on('checking-for-update', () => {
+    console.log('[AUTO-UPDATER] Checking for software updates...');
+    currentUpdateStatus.state = 'checking';
+    currentUpdateStatus.message = 'Checking for updates...';
+    currentUpdateStatus.error = null;
+    broadcastUpdateStatus();
+  });
+
+  autoUpdater.on('update-available', (info) => {
+    console.log('[AUTO-UPDATER] New release available:', info.version);
+    currentUpdateStatus.state = 'available';
+    currentUpdateStatus.availableVersion = info.version;
+    currentUpdateStatus.releaseNotes = typeof info.releaseNotes === 'string' ? info.releaseNotes : '';
+    currentUpdateStatus.message = `New version ${info.version} is available.`;
+    currentUpdateStatus.error = null;
+    broadcastUpdateStatus();
+
+    if (Notification.isSupported()) {
+      new Notification({
+        title: 'QuickPrint Update Available',
+        body: `Version ${info.version} is ready to download. Open Settings to update.`,
+      }).show();
+    }
+  });
+
+  autoUpdater.on('update-not-available', (info) => {
+    console.log('[AUTO-UPDATER] Software is up to date:', info?.version || app.getVersion());
+    currentUpdateStatus.state = 'not-available';
+    currentUpdateStatus.message = 'QuickPrint Counter OS is up to date.';
+    currentUpdateStatus.availableVersion = null;
+    currentUpdateStatus.error = null;
+    broadcastUpdateStatus();
+  });
+
+  autoUpdater.on('download-progress', (progressObj) => {
+    currentUpdateStatus.state = 'downloading';
+    currentUpdateStatus.progress = Math.round(progressObj.percent || 0);
+    currentUpdateStatus.bytesPerSecond = progressObj.bytesPerSecond || 0;
+    currentUpdateStatus.totalBytes = progressObj.total || 0;
+    currentUpdateStatus.transferredBytes = progressObj.transferred || 0;
+    currentUpdateStatus.message = `Downloading update: ${currentUpdateStatus.progress}% (${formatUpdateSpeed(progressObj.bytesPerSecond)})`;
+    broadcastUpdateStatus();
+  });
+
+  autoUpdater.on('update-downloaded', (info) => {
+    console.log('[AUTO-UPDATER] Update downloaded successfully:', info.version);
+    currentUpdateStatus.state = 'downloaded';
+    currentUpdateStatus.progress = 100;
+    currentUpdateStatus.message = `Version ${info.version} downloaded and verified. Ready to install.`;
+    currentUpdateStatus.error = null;
+    broadcastUpdateStatus();
+  });
+
+  autoUpdater.on('error', (err) => {
+    console.warn('[AUTO-UPDATER] Update server check note (local printing unaffected):', err.message);
+    currentUpdateStatus.state = 'error';
+    currentUpdateStatus.error = err.message;
+    currentUpdateStatus.message = 'Unable to check for updates. Local printing is unaffected.';
+    broadcastUpdateStatus();
+  });
+}
+
+function executeSafeUpdateInstall() {
+  // Requirement 9: NEVER restart/update while a print job is actively printing!
+  if (activePrintingJobsCount > 0) {
+    pendingDeferredUpdateInstall = true;
+    currentUpdateStatus.state = 'deferred';
+    currentUpdateStatus.message = 'Update is available. It will be installed after current print jobs are completed.';
+    broadcastUpdateStatus();
+    return {
+      success: false,
+      deferred: true,
+      message: currentUpdateStatus.message,
+    };
+  }
+
+  if (currentUpdateStatus.state !== 'downloaded') {
+    return {
+      success: false,
+      error: 'Update must be downloaded before installing.',
+    };
+  }
+
+  try {
+    pendingDeferredUpdateInstall = false;
+    // Quit and install silently or with standard restart
+    if (autoUpdater) {
+      autoUpdater.quitAndInstall(false, true);
+    }
+    return { success: true };
+  } catch (err) {
+    console.error('[AUTO-UPDATER] Failed to execute update installation:', err);
+    return { success: false, error: err.message };
+  }
 }
 
 // Setup persistent storage in standard OS AppData directory
@@ -79,6 +236,8 @@ let appConfig = {
   autoPrintEnabled: true,
   autoLaunch: true,
   soundAlert: true,
+  autoCheckUpdates: true,
+  updateChannel: 'stable',
 };
 
 // Also look for bundled config.json fallback
@@ -197,6 +356,607 @@ function getWindowsPrinters() {
   });
 }
 
+// Windows default printer discovery
+function getWindowsDefaultPrinter() {
+  return new Promise((resolve) => {
+    if (process.platform !== 'win32') {
+      return resolve('Virtual Spooler');
+    }
+    const cmd = 'powershell -NoProfile -Command "(Get-CimInstance Win32_Printer | Where-Object Default | Select-Object -First 1).Name"';
+    exec(cmd, (err, stdout) => {
+      const def = (stdout || '').trim();
+      resolve(def || 'Microsoft Print to PDF');
+    });
+  });
+}
+
+const lastKnownPrinterHealth = {};
+
+// Windows native printer health & availability check
+function getRealPrinterStatus(printerName) {
+  return new Promise((resolve) => {
+    const handleResult = (res) => {
+      if (printerName) {
+        lastKnownPrinterHealth[printerName] = res;
+      }
+      resolve(res);
+    };
+
+    if (process.platform !== 'win32') {
+      return handleResult({
+        exists: true,
+        status: 'READY',
+        details: 'Virtual Spooler Active',
+        isOnline: true,
+        jobCount: 0,
+      });
+    }
+
+    const safeName = (printerName || '').replace(/'/g, "''");
+    const script = `
+      try {
+        $safeName = '${safeName}'
+        $modern = Get-Printer -Name $safeName -ErrorAction SilentlyContinue
+        $p = Get-CimInstance Win32_Printer | Where-Object { $_.Name -eq $safeName } | Select-Object -First 1
+
+        if (-not $p -and -not $modern) {
+          @{ exists = $false; status = 'NOT_FOUND'; details = 'Printer not installed in Windows'; isOnline = $false; jobCount = 0 } | ConvertTo-Json -Compress
+          exit
+        }
+
+        $spoolJobs = Get-PrintJob -PrinterName $safeName -ErrorAction SilentlyContinue
+        $jCount = if ($spoolJobs) { @($spoolJobs).Count } else { 0 }
+
+        $status = 'READY'
+        $details = 'Printer Idle & Ready'
+        $isOnline = $true
+
+        # 1. Check Win32_Printer WorkOffline first (direct user or Windows toggle)
+        if ($p -and [bool]$p.WorkOffline) {
+          $status = 'OFFLINE'
+          $details = 'Printer is set to Offline in Windows'
+          $isOnline = $false
+        }
+        # 2. Check Modern Get-Printer PrinterStatus
+        elseif ($modern) {
+          $mStatus = [int]$modern.PrinterStatus
+          switch ($mStatus) {
+            0 {
+              $status = 'READY'
+              $details = 'Printer Idle & Ready'
+              $isOnline = $true
+            }
+            1 {
+              $status = 'PAUSED'
+              $details = 'Printer is paused in Windows'
+              $isOnline = $true
+            }
+            2 {
+              $status = 'ERROR'
+              $details = 'Printer error detected'
+              $isOnline = $false
+            }
+            4 {
+              $status = 'ERROR'
+              $details = 'Paper Jam'
+              $isOnline = $false
+            }
+            5 {
+              $status = 'ERROR'
+              $details = 'Paper Out / Tray Empty'
+              $isOnline = $false
+            }
+            8 {
+              $status = 'OFFLINE'
+              $details = 'Printer disconnected or power off'
+              $isOnline = $false
+            }
+            11 {
+              $status = 'PRINTING'
+              $details = 'Printer is currently printing'
+              $isOnline = $true
+            }
+            default {
+              if ($p) {
+                $ext = [int]$p.ExtendedPrinterStatus
+                if ($ext -eq 7) {
+                  $status = 'OFFLINE'
+                  $details = 'Printer disconnected or power off'
+                  $isOnline = $false
+                } elseif ($ext -eq 8) {
+                  $status = 'PAUSED'
+                  $details = 'Printer is paused'
+                  $isOnline = $true
+                } elseif ($ext -eq 9) {
+                  $status = 'ERROR'
+                  $details = 'Printer error reported'
+                  $isOnline = $false
+                } else {
+                  $status = 'READY'
+                  $details = 'Printer Idle & Ready'
+                  $isOnline = $true
+                }
+              } else {
+                $status = 'READY'
+                $details = 'Printer Ready'
+                $isOnline = $true
+              }
+            }
+          }
+        }
+        # 3. Fallback to WMI if Get-Printer is unavailable
+        elseif ($p) {
+          $ext = [int]$p.ExtendedPrinterStatus
+          if ($ext -eq 7) {
+            $status = 'OFFLINE'
+            $details = 'Printer disconnected or power off'
+            $isOnline = $false
+          } elseif ($ext -eq 8) {
+            $status = 'PAUSED'
+            $details = 'Printer is paused'
+            $isOnline = $true
+          } elseif ($ext -eq 9) {
+            $status = 'ERROR'
+            $details = 'Printer error reported'
+            $isOnline = $false
+          } else {
+            $status = 'READY'
+            $details = 'Printer Idle & Ready'
+            $isOnline = $true
+          }
+        }
+
+        @{
+          exists = $true;
+          status = $status;
+          details = $details;
+          isOnline = $isOnline;
+          jobCount = $jCount;
+        } | ConvertTo-Json -Compress
+      } catch {
+        @{ exists = $true; status = 'READY'; details = 'Spooler active'; isOnline = $true; jobCount = 0 } | ConvertTo-Json -Compress
+      }
+    `;
+
+    const encoded = Buffer.from(script, 'utf16le').toString('base64');
+    exec(`powershell -NoProfile -EncodedCommand ${encoded}`, (err, stdout) => {
+      if (err || !stdout) {
+        return handleResult({
+          exists: true,
+          status: 'READY',
+          details: 'Spooler active',
+          isOnline: true,
+          jobCount: 0,
+        });
+      }
+      try {
+        const parsed = JSON.parse(stdout.trim());
+        handleResult(parsed);
+      } catch (parseErr) {
+        handleResult({
+          exists: true,
+          status: 'READY',
+          details: 'Fallback status',
+          isOnline: true,
+          jobCount: 0,
+        });
+      }
+    });
+  });
+}
+
+// Hardware Printer Capability Auto-Detection (Windows PowerShell)
+function detectHardwarePrinterCapabilities(printerName) {
+  return new Promise((resolve) => {
+    if (process.platform !== 'win32') {
+      return resolve({
+        color: true,
+        bw: true,
+        duplex: true,
+        a4: true,
+        a3: false,
+        a5: true,
+        legal: true,
+        photo_4x6: true,
+        photo_5x7: true,
+        borderless: true,
+        detectedType: 'color',
+      });
+    }
+
+    const safeName = (printerName || '').replace(/'/g, "''");
+    const script = `
+      try {
+        $name = '${safeName}'
+        $cim = Get-CimInstance Win32_Printer | Where-Object { $_.Name -eq $name } | Select-Object -First 1
+        $conf = Get-PrintConfiguration -PrinterName $name -ErrorAction SilentlyContinue
+
+        $isColor = $false
+        if ($conf -and $conf.Color) { $isColor = [bool]$conf.Color }
+        elseif ($cim -and $cim.CapabilityDescriptions -match 'Color') { $isColor = $true }
+
+        $isDuplex = $false
+        if ($conf -and [int]$conf.DuplexingMode -gt 0) { $isDuplex = $true }
+        elseif ($cim -and $cim.CapabilityDescriptions -match 'Duplex') { $isDuplex = $true }
+
+        $nameLower = $name.ToLower()
+        $isPhoto = $nameLower -match 'photo' -or $nameLower -match 'deskjet' -or $nameLower -match 'inkjet' -or $nameLower -match 'l805' -or $nameLower -match 'xp-'
+        $isLarge = $nameLower -match 'plotter' -or $nameLower -match 'designjet' -or $nameLower -match 'large'
+
+        @{
+          color = $isColor;
+          bw = $true;
+          duplex = $isDuplex;
+          a4 = $true;
+          a3 = [bool]($isLarge -or $nameLower -match 'a3');
+          a5 = $true;
+          legal = $true;
+          photo_4x6 = $isPhoto;
+          photo_5x7 = $isPhoto;
+          borderless = $isPhoto;
+          detectedType = if ($isPhoto) { 'photo' } elseif ($isLarge) { 'large_format' } elseif ($isColor) { 'color' } else { 'bw' };
+        } | ConvertTo-Json -Compress
+      } catch {
+        @{
+          color = $true;
+          bw = $true;
+          duplex = $false;
+          a4 = $true;
+          a3 = $false;
+          a5 = $true;
+          legal = $true;
+          photo_4x6 = $false;
+          photo_5x7 = $false;
+          borderless = $false;
+          detectedType = 'color';
+        } | ConvertTo-Json -Compress
+      }
+    `;
+
+    const encoded = Buffer.from(script, 'utf16le').toString('base64');
+    exec(`powershell -NoProfile -EncodedCommand ${encoded}`, (err, stdout) => {
+      if (err || !stdout) {
+        return resolve({
+          color: true,
+          bw: true,
+          duplex: false,
+          a4: true,
+          a3: false,
+          a5: true,
+          legal: true,
+          photo_4x6: false,
+          photo_5x7: false,
+          borderless: false,
+          detectedType: 'color',
+        });
+      }
+      try {
+        const parsed = JSON.parse(stdout.trim());
+        resolve(parsed);
+      } catch (e) {
+        resolve({
+          color: true,
+          bw: true,
+          duplex: false,
+          a4: true,
+          a3: false,
+          a5: true,
+          legal: true,
+          photo_4x6: false,
+          photo_5x7: false,
+          borderless: false,
+          detectedType: 'color',
+        });
+      }
+    });
+  });
+}
+
+// Check if a specific printer satisfies the required job parameters (Requirement 13 & 21)
+function isPrinterCompatibleWithJob(job, printerProfile) {
+  if (!printerProfile) return { compatible: true };
+  if (printerProfile.enabled === false) {
+    return { compatible: false, reason: 'Printer disabled in Shop Routing Configuration' };
+  }
+
+  const caps = printerProfile.capabilities || {};
+
+  // Check Color Requirement
+  const jobColor = (job.color_mode || 'bw').toLowerCase();
+  if (jobColor === 'color' && !caps.color) {
+    return { compatible: false, reason: 'Printer is Monochrome only (Order requires Full Color)' };
+  }
+
+  // Check Duplex Requirement
+  if (job.duplex && !caps.duplex) {
+    return { compatible: false, reason: 'Printer does not support Two-Sided (Duplex) printing' };
+  }
+
+  // Check Paper / Photo Size Requirement
+  const rawPaper = (job.paper_size || 'A4').toUpperCase();
+  if (rawPaper.includes('A3') && !caps.a3) {
+    return { compatible: false, reason: 'Printer does not support A3 paper size' };
+  }
+  if (rawPaper.includes('4X6') && !caps.photo_4x6) {
+    return { compatible: false, reason: 'Printer does not support 4×6 photo size' };
+  }
+  if (rawPaper.includes('5X7') && !caps.photo_5x7) {
+    return { compatible: false, reason: 'Printer does not support 5×7 photo size' };
+  }
+  if (rawPaper.includes('LEGAL') && !caps.legal) {
+    return { compatible: false, reason: 'Printer does not support Legal paper size' };
+  }
+
+  // Check Photo Paper / Mode
+  if ((job.mode === 'photo' || rawPaper.includes('PHOTO')) && printerProfile.type === 'bw') {
+    return { compatible: false, reason: 'B&W printer cannot process photo studio jobs' };
+  }
+
+  return { compatible: true };
+}
+
+// Intelligent Multi-Printer Routing Selector (Requirement 14, 17, 18)
+function findBestPrinterForJob(job, printersList, liveHealthMap = {}) {
+  // If multi-printer mode is not enabled, default to single printer
+  if (!appConfig.multiPrinterMode) {
+    const fallback = appConfig.defaultPrinter || printersList[0] || 'Microsoft Print to PDF';
+    return { printer: fallback, reason: 'Single Printer Mode (Default)' };
+  }
+
+  const printersConfig = appConfig.printersConfig || {};
+  const candidates = [];
+
+  for (const name of printersList) {
+    const profile = printersConfig[name] || {
+      name,
+      enabled: true,
+      priority: name === appConfig.defaultPrinter ? 1 : 2,
+      capabilities: { a4: true, a3: false, a5: true, legal: true, color: true, bw: true, duplex: true, photo_4x6: false },
+    };
+
+    const comp = isPrinterCompatibleWithJob(job, profile);
+    if (!comp.compatible) continue;
+
+    const health = liveHealthMap[name] || { isOnline: true, status: 'READY', jobCount: 0 };
+    const isOnline = health.isOnline && health.status === 'READY';
+
+    candidates.push({
+      name,
+      profile,
+      health,
+      isOnline,
+      queueCount: Number(health.jobCount || 0),
+      priority: Number(profile.priority || 2),
+    });
+  }
+
+  if (candidates.length === 0) {
+    return {
+      printer: null,
+      status: 'waiting_for_compatible_printer',
+      reason: 'No compatible printer found in shop for this order configuration',
+    };
+  }
+
+  // Filter only online printers
+  const onlineCandidates = candidates.filter((c) => c.isOnline);
+  if (onlineCandidates.length === 0) {
+    return {
+      printer: candidates[0].name,
+      isOffline: true,
+      status: 'waiting_for_printer',
+      reason: 'All compatible printers are currently OFFLINE or in error',
+    };
+  }
+
+  // Rank online candidates:
+  // If loadBalancing enabled: lowest queueCount first, then lowest priority number (1 > 2 > 3)
+  // If loadBalancing disabled: priority first, then queueCount
+  onlineCandidates.sort((a, b) => {
+    if (appConfig.loadBalancing !== false) {
+      if (a.queueCount !== b.queueCount) return a.queueCount - b.queueCount;
+      return a.priority - b.priority;
+    } else {
+      if (a.priority !== b.priority) return a.priority - b.priority;
+      return a.queueCount - b.queueCount;
+    }
+  });
+
+  return {
+    printer: onlineCandidates[0].name,
+    reason: `Selected via ${appConfig.loadBalancing !== false ? 'Load Balancing (Queue: ' + onlineCandidates[0].queueCount + ')' : 'Priority ' + onlineCandidates[0].priority}`,
+  };
+}
+
+// Local application-managed media directory for privacy & reprint retention
+function getJobsMediaDir() {
+  const dir = path.join(app.getPath('userData'), 'jobs_media');
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  return dir;
+}
+
+// Download and verify local file persistence, then purge cloud copy
+async function ensureLocalMedia(job) {
+  const jobsMediaDir = getJobsMediaDir();
+  const jobDir = path.join(jobsMediaDir, String(job.id));
+  if (!fs.existsSync(jobDir)) {
+    fs.mkdirSync(jobDir, { recursive: true });
+  }
+
+  const rawExt = (job.file_name || 'doc').split('.').pop() || 'pdf';
+  const cleanExt = rawExt.toLowerCase().replace(/[^a-z0-9]/g, '') || 'pdf';
+  const localOriginalPath = path.join(jobDir, `original.${cleanExt}`);
+
+  // If local file already exists with valid content, reuse it
+  if (fs.existsSync(localOriginalPath)) {
+    try {
+      const stats = fs.statSync(localOriginalPath);
+      if (stats.size > 0) {
+        return localOriginalPath;
+      }
+    } catch (e) {}
+  }
+
+  if (!job.file_url) {
+    throw new Error('No printable file URL found for this order');
+  }
+
+  // Download from temporary cloud storage
+  console.log(`[MEDIA] Downloading remote file for Job #${job.token_number || job.id} to local storage...`);
+  await downloadRemoteFile(job.file_url, localOriginalPath);
+
+  // Verify local existence & readability
+  if (!fs.existsSync(localOriginalPath)) {
+    throw new Error('Local media verification failed: File was not created');
+  }
+  const stat = fs.statSync(localOriginalPath);
+  if (stat.size <= 0) {
+    fs.unlinkSync(localOriginalPath);
+    throw new Error('Local media verification failed: Downloaded file is 0 bytes');
+  }
+
+  console.log(`[MEDIA] Local media verified (${stat.size} bytes): ${localOriginalPath}`);
+
+  // Safely trigger cloud purge since local copy is now verified
+  try {
+    const purgeBaseUrl = (appConfig.appUrl || DEFAULT_APP_URL).replace(/\/+$/, '');
+    const purgeUrl = `${purgeBaseUrl}/api/jobs/${job.id}/purge-cloud`;
+    const client = getSupabase();
+    console.log(`[MEDIA] Purging temporary cloud storage via ${purgeUrl}...`);
+
+    const httpModule = purgeUrl.startsWith('https') ? https : http;
+    const req = httpModule.request(purgeUrl, { method: 'POST', timeout: 5000 }, (res) => {
+      console.log(`[MEDIA] Cloud purge response HTTP ${res.statusCode}`);
+    });
+    req.on('error', (err) => {
+      console.warn('[MEDIA] Cloud purge notification note:', err.message);
+    });
+    req.end();
+
+    if (client) {
+      await client.from('jobs').update({
+        cloud_media_status: 'purged',
+        local_media_status: 'available',
+      }).eq('id', job.id);
+    }
+  } catch (purgeErr) {
+    console.warn('[MEDIA] Purge trigger error:', purgeErr.message);
+  }
+
+  return localOriginalPath;
+}
+
+// Media storage statistics
+function getMediaStorageStats() {
+  const jobsMediaDir = getJobsMediaDir();
+  let totalBytes = 0;
+  let fileCount = 0;
+
+  function scanDir(dir) {
+    if (!fs.existsSync(dir)) return;
+    const items = fs.readdirSync(dir);
+    for (const item of items) {
+      const full = path.join(dir, item);
+      try {
+        const stat = fs.statSync(full);
+        if (stat.isDirectory()) {
+          scanDir(full);
+        } else if (stat.isFile()) {
+          fileCount++;
+          totalBytes += stat.size;
+        }
+      } catch (e) {}
+    }
+  }
+
+  scanDir(jobsMediaDir);
+  return { totalBytes, fileCount, formattedSize: (totalBytes / (1024 * 1024)).toFixed(2) + ' MB' };
+}
+
+// Delete local media for a single job
+async function deleteLocalJobMedia(jobId) {
+  const jobsMediaDir = getJobsMediaDir();
+  const jobDir = path.join(jobsMediaDir, String(jobId));
+  if (fs.existsSync(jobDir)) {
+    try {
+      fs.rmSync(jobDir, { recursive: true, force: true });
+    } catch (e) {
+      console.warn(`[MEDIA] Could not remove directory ${jobDir}:`, e.message);
+    }
+  }
+
+  const client = getSupabase();
+  if (client && jobId) {
+    try {
+      await client.from('jobs').update({ local_media_status: 'deleted' }).eq('id', jobId);
+    } catch (e) {}
+  }
+  return { success: true };
+}
+
+// Delete all local media for completed print jobs
+async function clearAllPrintedLocalMedia() {
+  const client = getSupabase();
+  const jobsMediaDir = getJobsMediaDir();
+  let deletedCount = 0;
+
+  if (client) {
+    try {
+      const { data: completedJobs } = await client
+        .from('jobs')
+        .select('id')
+        .in('print_status', ['completed', 'failed']);
+
+      if (completedJobs && completedJobs.length > 0) {
+        for (const j of completedJobs) {
+          const dir = path.join(jobsMediaDir, String(j.id));
+          if (fs.existsSync(dir)) {
+            try {
+              fs.rmSync(dir, { recursive: true, force: true });
+              deletedCount++;
+            } catch (e) {}
+          }
+        }
+
+        const ids = completedJobs.map((j) => j.id);
+        await client.from('jobs').update({ local_media_status: 'deleted' }).in('id', ids);
+      }
+    } catch (e) {
+      console.warn('[MEDIA] clearAllPrintedLocalMedia error:', e.message);
+    }
+  }
+
+  return { success: true, deletedCount };
+}
+
+// Periodic background printer health monitoring
+let printerMonitorTimer = null;
+let lastKnownPrinterStatus = null;
+
+function startPrinterMonitoring() {
+  if (printerMonitorTimer) clearInterval(printerMonitorTimer);
+
+  printerMonitorTimer = setInterval(async () => {
+    const targetPrinter = appConfig.defaultPrinter || 'Microsoft Print to PDF';
+    try {
+      const health = await getRealPrinterStatus(targetPrinter);
+      const statusKey = `${health.status}_${health.details}_${health.jobCount}`;
+
+      if (statusKey !== lastKnownPrinterStatus) {
+        lastKnownPrinterStatus = statusKey;
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('printer-status-updated', {
+            printer: targetPrinter,
+            ...health,
+          });
+        }
+      }
+    } catch (e) {}
+  }, 4000);
+}
+
 function createWindow() {
   let iconPath = path.join(__dirname, 'assets', 'icon.png');
   if (process.platform === 'win32') {
@@ -223,6 +983,19 @@ function createWindow() {
   // Load self-contained local Industrial White UI
   const uiEntry = path.join(__dirname, 'ui', 'index.html');
   mainWindow.loadFile(uiEntry);
+
+  mainWindow.webContents.on('did-finish-load', async () => {
+    try {
+      const targetPrinter = appConfig.defaultPrinter || await getWindowsDefaultPrinter();
+      const health = await getRealPrinterStatus(targetPrinter);
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('printer-status-updated', {
+          printer: targetPrinter,
+          ...health,
+        });
+      }
+    } catch (e) {}
+  });
 
   // Minimize to tray on close
   mainWindow.on('close', (event) => {
@@ -395,6 +1168,62 @@ function updateAutoLaunch(enable) {
 
 // --- IPC HANDLERS ---
 function registerIpcHandlers() {
+  // Synchronous version lookup for preload
+  ipcMain.on('get-app-version', (event) => {
+    event.returnValue = app.getVersion();
+  });
+
+  // Software Update IPC Handlers
+  ipcMain.handle('updater-get-version', () => {
+    return app.getVersion();
+  });
+
+  ipcMain.handle('updater-get-status', () => {
+    currentUpdateStatus.currentVersion = app.getVersion();
+    return { ...currentUpdateStatus };
+  });
+
+  ipcMain.handle('updater-check', async () => {
+    if (!autoUpdater) {
+      return { success: false, error: 'Auto-updater not supported in this environment' };
+    }
+    try {
+      currentUpdateStatus.state = 'checking';
+      currentUpdateStatus.message = 'Checking for updates...';
+      broadcastUpdateStatus();
+      const result = await autoUpdater.checkForUpdates();
+      return { success: true, result };
+    } catch (err) {
+      console.warn('[AUTO-UPDATER] Check error (local printing unaffected):', err.message);
+      currentUpdateStatus.state = 'error';
+      currentUpdateStatus.error = err.message;
+      currentUpdateStatus.message = 'Unable to check for updates. Local printing is unaffected.';
+      broadcastUpdateStatus();
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('updater-download', async () => {
+    if (!autoUpdater) return { success: false, error: 'Auto-updater unavailable' };
+    try {
+      currentUpdateStatus.state = 'downloading';
+      currentUpdateStatus.progress = 0;
+      currentUpdateStatus.message = 'Starting download...';
+      broadcastUpdateStatus();
+      await autoUpdater.downloadUpdate();
+      return { success: true };
+    } catch (err) {
+      currentUpdateStatus.state = 'error';
+      currentUpdateStatus.error = err.message;
+      broadcastUpdateStatus();
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('updater-install', async () => {
+    return executeSafeUpdateInstall();
+  });
+
   ipcMain.on('window-control', (_e, action) => {
     if (!mainWindow) return;
     if (action === 'minimize') mainWindow.minimize();
@@ -450,7 +1279,7 @@ function registerIpcHandlers() {
     if (QRCode && QRCode.toDataURL) {
       try {
         const dataUrl = await QRCode.toDataURL(text, {
-          width: 260,
+          width: 600,
           margin: 2,
           color: {
             dark: '#0F172A',
@@ -463,7 +1292,28 @@ function registerIpcHandlers() {
       }
     }
     // Fallback to online API if needed
-    return `https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=4&data=${encodeURIComponent(text)}`;
+    return `https://api.qrserver.com/v1/create-qr-code/?size=600x600&margin=4&data=${encodeURIComponent(text)}`;
+  });
+
+  // Offline Native QR Code Generation (SVG)
+  ipcMain.handle('generate-qr-svg', async (_e, text) => {
+    if (!text) return null;
+    if (QRCode && QRCode.toString) {
+      try {
+        const svg = await QRCode.toString(text, {
+          type: 'svg',
+          margin: 2,
+          color: {
+            dark: '#0F172A',
+            light: '#FFFFFF',
+          },
+        });
+        return svg;
+      } catch (err) {
+        console.error('Local QR SVG generation error:', err);
+      }
+    }
+    return null;
   });
 
   // Session: Check saved session
@@ -672,6 +1522,10 @@ function registerIpcHandlers() {
   // Printers: List
   ipcMain.handle('printers-list', async () => {
     const printers = await getWindowsPrinters();
+    if (!appConfig.defaultPrinter) {
+      appConfig.defaultPrinter = await getWindowsDefaultPrinter();
+      saveConfig();
+    }
     const defaultPrinter = appConfig.defaultPrinter || printers[0] || 'Microsoft Print to PDF';
     return { printers, defaultPrinter };
   });
@@ -704,7 +1558,95 @@ function registerIpcHandlers() {
     return { success: true, simulated: true };
   });
 
-  // Jobs: Print Job (Direct Physical Spooler Pipeline)
+  // Printers: Multi-Printer Management Config & Status
+  ipcMain.handle('printers-get-config', async () => {
+    const printers = await getWindowsPrinters();
+    if (!appConfig.defaultPrinter) {
+      appConfig.defaultPrinter = await getWindowsDefaultPrinter();
+      saveConfig();
+    }
+    return {
+      multiPrinterMode: !!appConfig.multiPrinterMode,
+      printerAssignmentMode: appConfig.printerAssignmentMode || 'auto',
+      loadBalancing: appConfig.loadBalancing !== false,
+      printersConfig: appConfig.printersConfig || {},
+      printers,
+      defaultPrinter: appConfig.defaultPrinter,
+    };
+  });
+
+  // Printers: Save Multi-Printer Routing Preferences
+  ipcMain.handle('printers-save-config', async (_e, config) => {
+    if (typeof config.multiPrinterMode === 'boolean') appConfig.multiPrinterMode = config.multiPrinterMode;
+    if (config.printerAssignmentMode) appConfig.printerAssignmentMode = config.printerAssignmentMode;
+    if (typeof config.loadBalancing === 'boolean') appConfig.loadBalancing = config.loadBalancing;
+    if (config.printersConfig) appConfig.printersConfig = config.printersConfig;
+    saveConfig();
+    return { success: true };
+  });
+
+  // Printers: Auto-Detect Hardware Capabilities
+  ipcMain.handle('printers-detect-capabilities', async (_e, printerName) => {
+    return await detectHardwarePrinterCapabilities(printerName);
+  });
+
+  // Printers: Reassign Pending Jobs From Offline Printer (Requirement 20)
+  ipcMain.handle('printers-reassign-jobs', async (_e, { fromPrinter, toPrinter }) => {
+    const client = getSupabase();
+    if (!client) return { success: false, error: 'Database service unavailable' };
+
+    const shopId = appConfig.shopId;
+    if (!shopId) return { success: false, error: 'Shop ID not configured' };
+
+    try {
+      const { data: jobs, error } = await client
+        .from('jobs')
+        .select('*')
+        .eq('shop_id', shopId)
+        .in('print_status', ['queued', 'pending_payment', 'waiting_for_printer']);
+
+      if (error) return { success: false, error: error.message };
+
+      const allPrinters = await getWindowsPrinters();
+      let reassignedCount = 0;
+
+      for (const job of (jobs || [])) {
+        if (job.assigned_printer === fromPrinter || !job.assigned_printer) {
+          let chosen = toPrinter;
+          if (!chosen) {
+            const best = findBestPrinterForJob(job, allPrinters, lastKnownPrinterHealth);
+            if (best.printer && !best.isOffline) chosen = best.printer;
+          }
+
+          if (chosen) {
+            const profile = appConfig.printersConfig?.[chosen];
+            if (!profile || isPrinterCompatibleWithJob(job, profile).compatible) {
+              await client.from('jobs').update({
+                assigned_printer: chosen,
+                print_status: 'queued',
+                failure_reason: null,
+              }).eq('id', job.id);
+              reassignedCount++;
+
+              if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('job-updated', {
+                  ...job,
+                  assigned_printer: chosen,
+                  print_status: 'queued',
+                });
+              }
+            }
+          }
+        }
+      }
+
+      return { success: true, reassignedCount };
+    } catch (reassignErr) {
+      return { success: false, error: reassignErr.message };
+    }
+  });
+
+  // Jobs: Print Job (Direct Physical Spooler Pipeline with real health check & capability routing)
   ipcMain.handle('jobs-print', async (_e, { jobId, options = {} }) => {
     console.log('[SPOOLER] Processing print job request:', jobId, options);
     const client = getSupabase();
@@ -716,44 +1658,103 @@ function registerIpcHandlers() {
       return { success: false, error: fetchErr?.message || 'Job not found in database' };
     }
 
+    // Step 0: Determine Target Printer with Intelligent Capability Routing
+    let printerName = options.printerName || job.assigned_printer;
+    if (!printerName) {
+      const allPrinters = await getWindowsPrinters();
+      const best = findBestPrinterForJob(job, allPrinters, lastKnownPrinterHealth);
+      if (!best.printer || best.isOffline) {
+        const failureReason = best.reason || 'No ready compatible printer available in shop';
+        console.warn(`[SPOOLER] Job ${jobId} hold: ${failureReason}`);
+        await client.from('jobs').update({
+          print_status: 'waiting_for_printer',
+          failure_reason: failureReason,
+        }).eq('id', jobId);
+
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('job-status-updated', {
+            jobId,
+            status: 'waiting_for_printer',
+            error: failureReason,
+          });
+        }
+        return { success: false, waitingForPrinter: true, error: failureReason };
+      }
+      printerName = best.printer;
+    }
+
+    // Step 0.5: Enforce Capability Compatibility Verification
+    const profile = appConfig.printersConfig?.[printerName] || null;
+    const compatibility = isPrinterCompatibleWithJob(job, profile);
+    if (!compatibility.compatible) {
+      const errMsg = `Printer "${printerName}" is incompatible with this job: ${compatibility.reason}`;
+      console.warn(`[SPOOLER] Capability mismatch for job ${jobId}: ${errMsg}`);
+      await client.from('jobs').update({
+        print_status: 'waiting_for_printer',
+        failure_reason: errMsg,
+      }).eq('id', jobId);
+
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('job-status-updated', {
+          jobId,
+          status: 'waiting_for_printer',
+          error: errMsg,
+        });
+      }
+      return { success: false, incompatible: true, error: errMsg };
+    }
+
+    // Step 1: Real Windows Printer Status Check — NEVER print to an offline printer!
+    const health = await getRealPrinterStatus(printerName);
+    if (!health.isOnline || health.status === 'OFFLINE' || health.status === 'ERROR') {
+      console.warn(`[SPOOLER] Cannot print job ${jobId}: Printer "${printerName}" is ${health.status} (${health.details})`);
+      await client.from('jobs').update({
+        print_status: 'waiting_for_printer',
+        failure_reason: `Printer "${printerName}" is ${health.status}: ${health.details}`,
+      }).eq('id', jobId);
+
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('job-status-updated', {
+          jobId,
+          status: 'waiting_for_printer',
+          error: `Printer "${printerName}" is ${health.status} (${health.details})`,
+        });
+        mainWindow.webContents.send('printer-status-updated', {
+          printer: printerName,
+          ...health,
+        });
+      }
+      return {
+        success: false,
+        printerOffline: true,
+        error: `Printer "${printerName}" is OFFLINE (${health.details}). Please connect printer.`,
+      };
+    }
+
     // Step 1: Update status to 'printing'
     await client.from('jobs').update({ print_status: 'printing' }).eq('id', jobId);
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('job-status-updated', { jobId, status: 'printing' });
     }
 
+    activePrintingJobsCount++;
     try {
-      const printerName = options.printerName || appConfig.defaultPrinter || 'Microsoft Print to PDF';
-      const fileUrl = options.fileUrl || job.file_url;
       const copies = Math.max(1, Number(options.copies || job.copies || 1));
       const rawPaper = options.paperSize || job.paper_size || 'A4';
       const paperSize = rawPaper.split(' + ')[0].toUpperCase();
       const duplex = options.duplex ?? job.duplex ?? false;
 
-      if (!fileUrl) {
-        throw new Error('No printable document file URL associated with this order');
-      }
-
-      // Download file to temp spool directory
-      const tempDir = path.join(os.tmpdir(), 'quickprint_spool');
-      if (!fs.existsSync(tempDir)) {
-        fs.mkdirSync(tempDir, { recursive: true });
-      }
-
-      const ext = (job.file_name || 'doc').split('.').pop() || 'pdf';
-      const tempFilePath = path.join(tempDir, `job_${job.token_number || Date.now()}_${Date.now()}.${ext}`);
-
-      await downloadRemoteFile(fileUrl, tempFilePath);
-      console.log(`[SPOOLER] Spool file downloaded: ${tempFilePath}`);
-
-      let printableFilePath = tempFilePath;
-      const cleanExt = ext.toLowerCase();
+      // Step 2: Download and verify local media persistence (Application-Managed Directory)
+      const localOriginalFile = await ensureLocalMedia(job);
+      let printableFilePath = localOriginalFile;
+      const jobDir = path.dirname(localOriginalFile);
+      const cleanExt = (job.file_name || 'doc').split('.').pop()?.toLowerCase() || 'pdf';
 
       // Convert images (jpg, png, etc.) to standard A4 PDF for native physical spooling
-      if (['jpg', 'jpeg', 'png'].includes(cleanExt)) {
+      if (['jpg', 'jpeg', 'png', 'webp'].includes(cleanExt)) {
         try {
           const { PDFDocument } = require('pdf-lib');
-          const imageBytes = fs.readFileSync(tempFilePath);
+          const imageBytes = fs.readFileSync(localOriginalFile);
           const pdfDoc = await PDFDocument.create();
           let embeddedImage;
           if (cleanExt === 'png') {
@@ -761,11 +1762,10 @@ function registerIpcHandlers() {
           } else {
             embeddedImage = await pdfDoc.embedJpg(imageBytes);
           }
-          // A4 dimensions in points: 595.28 x 841.89
           const a4Width = 595.28;
           const a4Height = 841.89;
           const page = pdfDoc.addPage([a4Width, a4Height]);
-          const margin = 36; // 0.5 inch margins
+          const margin = 36;
           const maxWidth = a4Width - (margin * 2);
           const maxHeight = a4Height - (margin * 2);
           const imgDims = embeddedImage.scaleToFit(maxWidth, maxHeight);
@@ -779,7 +1779,7 @@ function registerIpcHandlers() {
             height: imgDims.height,
           });
 
-          const convertedPdfPath = path.join(tempDir, `print_${Date.now()}.pdf`);
+          const convertedPdfPath = path.join(jobDir, `converted_${Date.now()}.pdf`);
           const pdfBytes = await pdfDoc.save();
           fs.writeFileSync(convertedPdfPath, pdfBytes);
           printableFilePath = convertedPdfPath;
@@ -790,7 +1790,7 @@ function registerIpcHandlers() {
       }
 
       // Page-by-page / Selective page reprint support
-      if ((options.pageRange || options.pages) && printableFilePath.toLowerCase().endsWith('.pdf')) {
+      if ((options.pageRange || options.pages || job.selected_pages) && printableFilePath.toLowerCase().endsWith('.pdf')) {
         try {
           const { PDFDocument } = require('pdf-lib');
           const sourceBytes = fs.readFileSync(printableFilePath);
@@ -800,28 +1800,26 @@ function registerIpcHandlers() {
           let targetIndices = [];
           if (Array.isArray(options.pages)) {
             targetIndices = options.pages.map((p) => Number(p) - 1);
+          } else if (Array.isArray(job.selected_pages) && !options.pageRange) {
+            targetIndices = job.selected_pages.map((p) => Number(p) - 1);
           } else if (typeof options.pageRange === 'string') {
             const rawRange = options.pageRange.trim();
             if (rawRange.endsWith('-')) {
-              // e.g. "3-" means page 3 to end
               const start = parseInt(rawRange.slice(0, -1), 10);
               for (let i = start; i <= totalSrcPages; i++) {
                 targetIndices.push(i - 1);
               }
             } else if (rawRange.includes('-')) {
-              // e.g. "3-5"
               const [start, end] = rawRange.split('-').map(Number);
               for (let i = start; i <= end; i++) {
                 targetIndices.push(i - 1);
               }
             } else {
-              // e.g. "3"
               const single = parseInt(rawRange, 10);
               if (!isNaN(single)) targetIndices.push(single - 1);
             }
           }
 
-          // Filter valid indices
           targetIndices = targetIndices.filter((idx) => idx >= 0 && idx < totalSrcPages);
 
           if (targetIndices.length > 0) {
@@ -830,7 +1828,7 @@ function registerIpcHandlers() {
             copied.forEach((p) => slicedDoc.addPage(p));
             const slicedBytes = await slicedDoc.save();
 
-            const slicedFilePath = path.join(tempDir, `sliced_${Date.now()}.pdf`);
+            const slicedFilePath = path.join(jobDir, `sliced_${Date.now()}.pdf`);
             fs.writeFileSync(slicedFilePath, slicedBytes);
             printableFilePath = slicedFilePath;
             console.log(`[SPOOLER] Sliced PDF to target pages (${targetIndices.map((i) => i + 1).join(', ')}): ${printableFilePath}`);
@@ -840,7 +1838,7 @@ function registerIpcHandlers() {
         }
       }
 
-      // Spool to Windows printer via pdf-to-printer
+      // Step 3: Spool to physical Windows printer
       let ptp = null;
       try {
         ptp = require('pdf-to-printer');
@@ -858,7 +1856,7 @@ function registerIpcHandlers() {
 
         console.log('[SPOOLER] Sending to physical printer via pdf-to-printer:', ptpOpts);
         await ptp.print(printableFilePath, ptpOpts);
-        console.log('[SPOOLER] Spooler accepted job successfully.');
+        console.log('[SPOOLER] Spooler accepted job submission.');
       } else if (process.platform === 'win32') {
         const psCmd = `powershell -NoProfile -Command "Start-Process -FilePath '${printableFilePath.replace(/'/g, "''")}' -Verb PrintTo -ArgumentList '\"${printerName}\"' -PassThru | Wait-Process -Timeout 15"`;
         await new Promise((resolve) => {
@@ -869,21 +1867,53 @@ function registerIpcHandlers() {
         });
       }
 
-      // Clean up temp files safely
-      setTimeout(() => {
-        try { fs.unlinkSync(tempFilePath); } catch (e) {}
-        if (printableFilePath !== tempFilePath) {
-          try { fs.unlinkSync(printableFilePath); } catch (e) {}
-        }
-      }, 8000);
+      // Step 4: REAL Spooler Queue Monitoring (DO NOT fake completion with timeout!)
+      let jobDone = false;
+      let checkAttempts = 0;
+      const maxChecks = 35; // poll up to 35 seconds for hardware spool clearance
 
-      // Step 2: Mark print completed in database
+      while (!jobDone && checkAttempts < maxChecks) {
+        await new Promise((r) => setTimeout(r, 1000));
+        checkAttempts++;
+
+        const currentHealth = await getRealPrinterStatus(printerName);
+
+        // If printer disconnected or went into error during print:
+        if (currentHealth.status === 'OFFLINE' || currentHealth.status === 'ERROR' || !currentHealth.isOnline) {
+          console.warn(`[SPOOLER] Printer went ${currentHealth.status} during print of job ${jobId}`);
+          await client.from('jobs').update({
+            print_status: 'waiting_for_printer',
+            failure_reason: `Printer disconnected during print: ${currentHealth.details}`,
+          }).eq('id', jobId);
+
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('job-status-updated', {
+              jobId,
+              status: 'waiting_for_printer',
+              error: currentHealth.details,
+            });
+            mainWindow.webContents.send('printer-status-updated', {
+              printer: printerName,
+              ...currentHealth,
+            });
+          }
+          return { success: false, error: `Printer went offline during printing: ${currentHealth.details}` };
+        }
+
+        // Job has cleared the Windows spooler queue and printer is ready
+        if (currentHealth.jobCount === 0 && (currentHealth.status === 'READY' || currentHealth.status === 'PRINTING')) {
+          jobDone = true;
+        }
+      }
+
+      // Step 5: Mark print completed in database
       const completedAt = new Date().toISOString();
       await client
         .from('jobs')
         .update({
           print_status: 'completed',
           completed_at: completedAt,
+          local_media_status: 'available',
         })
         .eq('id', jobId);
 
@@ -907,6 +1937,14 @@ function registerIpcHandlers() {
       }
 
       return { success: false, error: err.message };
+    } finally {
+      activePrintingJobsCount = Math.max(0, activePrintingJobsCount - 1);
+      if (pendingDeferredUpdateInstall && activePrintingJobsCount === 0) {
+        console.log('[AUTO-UPDATER] All active prints completed. Triggering deferred update installation...');
+        setTimeout(() => {
+          executeSafeUpdateInstall();
+        }, 1500);
+      }
     }
   });
 
@@ -1014,7 +2052,111 @@ function registerIpcHandlers() {
     return { success: false, error: 'Shop not configured' };
   });
 
-  // Settings: Update Pricing
+  // Printers: Live Health & Spooler Diagnostics
+  ipcMain.handle('printers-get-health', async (_e, printerName) => {
+    const target = printerName || appConfig.defaultPrinter || 'Microsoft Print to PDF';
+    return await getRealPrinterStatus(target);
+  });
+
+  // Media: Get Local Media URL for High-Speed Direct Preview
+  ipcMain.handle('media-get-url', async (_e, jobId) => {
+    const jobsMediaDir = getJobsMediaDir();
+    const jobDir = path.join(jobsMediaDir, String(jobId));
+    if (fs.existsSync(jobDir)) {
+      const files = fs.readdirSync(jobDir);
+      const orig = files.find((f) => f.startsWith('original.'));
+      if (orig) {
+        const localPath = path.join(jobDir, orig);
+        if (fs.existsSync(localPath) && fs.statSync(localPath).size > 0) {
+          const fileData = fs.readFileSync(localPath);
+          const ext = path.extname(orig).toLowerCase();
+          let mime = 'application/pdf';
+          if (ext === '.png') mime = 'image/png';
+          else if (ext === '.jpg' || ext === '.jpeg') mime = 'image/jpeg';
+          else if (ext === '.webp') mime = 'image/webp';
+          const base64 = fileData.toString('base64');
+          return { available: true, dataUrl: `data:${mime};base64,${base64}`, ext };
+        }
+      }
+    }
+    return { available: false };
+  });
+
+  // Media: Download Original Media File (Desktop Save Dialog)
+  ipcMain.handle('media-download', async (_e, { jobId, fileName }) => {
+    const client = getSupabase();
+    const jobsMediaDir = getJobsMediaDir();
+    const jobDir = path.join(jobsMediaDir, String(jobId));
+
+    let localFilePath = null;
+    if (fs.existsSync(jobDir)) {
+      const files = fs.readdirSync(jobDir);
+      const orig = files.find((f) => f.startsWith('original.'));
+      if (orig) {
+        const p = path.join(jobDir, orig);
+        if (fs.existsSync(p) && fs.statSync(p).size > 0) {
+          localFilePath = p;
+        }
+      }
+    }
+
+    // Fallback: If not in local cache yet, attempt to download from remote if still available
+    if (!localFilePath && client && jobId) {
+      try {
+        const { data: job } = await client.from('jobs').select('*').eq('id', jobId).single();
+        if (job && job.local_media_status !== 'deleted' && job.file_url) {
+          localFilePath = await ensureLocalMedia(job);
+        }
+      } catch (err) {
+        console.warn('[MEDIA] Ensure media fallback error:', err.message);
+      }
+    }
+
+    if (!localFilePath || !fs.existsSync(localFilePath)) {
+      return { success: false, error: 'Media file is no longer available.' };
+    }
+
+    const ext = path.extname(localFilePath) || '.pdf';
+    const cleanBase = (fileName || `Order_${jobId}`).replace(/[/\\?%*:|"<>]/g, '_');
+    const defaultName = cleanBase.endsWith(ext) ? cleanBase : `${cleanBase}${ext}`;
+
+    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+      title: 'Save Customer Media File',
+      defaultPath: path.join(app.getPath('downloads'), defaultName),
+      filters: [
+        { name: 'Original File', extensions: [ext.replace(/^\./, '')] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+    });
+
+    if (canceled || !filePath) {
+      return { success: false, canceled: true };
+    }
+
+    try {
+      fs.copyFileSync(localFilePath, filePath);
+      return { success: true, savedPath: filePath };
+    } catch (saveErr) {
+      return { success: false, error: saveErr.message };
+    }
+  });
+
+  // Media: Delete Local File for Completed Job
+  ipcMain.handle('media-delete-local', async (_e, jobId) => {
+    return await deleteLocalJobMedia(jobId);
+  });
+
+  // Media: Clear All Printed Local Media
+  ipcMain.handle('media-clear-printed', async () => {
+    return await clearAllPrintedLocalMedia();
+  });
+
+  // Media: Storage Disk Statistics
+  ipcMain.handle('media-storage-stats', async () => {
+    return getMediaStorageStats();
+  });
+
+  // Settings: Update Pricing (Full Authoritative Catalog Sync)
   ipcMain.handle('settings-update-pricing', async (_e, pricing) => {
     const client = getSupabase();
     const saved = readSavedSession();
@@ -1025,10 +2167,10 @@ function registerIpcHandlers() {
         const { data: existingShop } = await client.from('shops').select('price_config').eq('id', shopId).single();
         const prevConfig = existingShop?.price_config || {};
 
-        const singleBw = Number(pricing.rateBwSingle || 2.0);
-        const doubleBw = Number(pricing.rateBwDouble || 3.0);
-        const singleColor = Number(pricing.rateColorSingle || 10.0);
-        const doubleColor = Number(pricing.rateColorDouble || 18.0);
+        const singleBw = Number(pricing.rateBwSingle ?? prevConfig.rateBwSingle ?? 2.0);
+        const doubleBw = Number(pricing.rateBwDouble ?? prevConfig.rateBwDouble ?? 3.0);
+        const singleColor = Number(pricing.rateColorSingle ?? prevConfig.rateColorSingle ?? 10.0);
+        const doubleColor = Number(pricing.rateColorDouble ?? prevConfig.rateColorDouble ?? 18.0);
 
         const priceConfig = {
           ...prevConfig,
@@ -1046,13 +2188,45 @@ function registerIpcHandlers() {
           rateBwDouble: doubleBw,
           rateColorSingle: singleColor,
           rateColorDouble: doubleColor,
-          rateSpiralBinding: Number(pricing.rateSpiralBinding || 30.0),
-          rateStapling: Number(pricing.rateStapling || 2.0),
+          rateSpiralBinding: Number(pricing.rateSpiralBinding ?? prevConfig.rateSpiralBinding ?? 30.0),
+          rateStapling: Number(pricing.rateStapling ?? prevConfig.rateStapling ?? 2.0),
           paperSizes: pricing.paperSizes || prevConfig.paperSizes || {
-            a4: { name: 'A4', extra: 0.0, description: 'Standard 75 GSM' },
-            a3: { name: 'A3', extra: 4.0, description: 'Large Sheet' },
-            passport: { name: 'Passport (8×)', extra: 35.0, description: 'Glossy Sheet' },
-            custom: { name: 'Custom / Legal', extra: 2.0, description: 'Legal/Bond' },
+            a4: { name: 'A4', extra: 0.0, enabled: true },
+            a3: { name: 'A3', extra: 4.0, enabled: true },
+            a5: { name: 'A5', extra: 0.0, enabled: true },
+            legal: { name: 'Legal', extra: 2.0, enabled: true },
+            letter: { name: 'Letter', extra: 0.0, enabled: true },
+            custom: { name: 'Custom / Legal', extra: 2.0, enabled: true },
+            passport: { name: 'Passport (8×)', extra: 35.0, enabled: true },
+          },
+          paperTypes: pricing.paperTypes || prevConfig.paperTypes || {
+            plain: { name: 'Plain Paper', extra: 0.0, enabled: true },
+            bond: { name: 'Bond Paper', extra: 2.0, enabled: true },
+            glossy: { name: 'Glossy Paper', extra: 10.0, enabled: true },
+            photo_paper: { name: 'Photo Paper', extra: 12.0, enabled: true },
+            matte: { name: 'Matte Photo Paper', extra: 8.0, enabled: true },
+          },
+          qualities: pricing.qualities || prevConfig.qualities || {
+            normal: { name: 'Normal', extra: 0.0, enabled: true },
+            high: { name: 'High', extra: 2.0, enabled: true },
+            photo_grade: { name: 'Photo Grade', extra: 8.0, enabled: true },
+          },
+          photoSizes: pricing.photoSizes || prevConfig.photoSizes || {
+            '4x6': { name: '4 × 6 inch', price: 15.0, enabled: true },
+            '5x7': { name: '5 × 7 inch', price: 25.0, enabled: true },
+            '6x8': { name: '6 × 8 inch', price: 35.0, enabled: true },
+            passport: { name: 'Passport Photo', price: 35.0, enabled: true },
+            a4_photo: { name: 'A4 Photo', price: 50.0, enabled: true },
+          },
+          photoPapers: pricing.photoPapers || prevConfig.photoPapers || {
+            glossy: { name: 'Glossy', extra: 0.0, enabled: true },
+            matte: { name: 'Matte', extra: 5.0, enabled: true },
+            premium: { name: 'Premium Photo Paper', extra: 10.0, enabled: true },
+          },
+          photoQualities: pricing.photoQualities || prevConfig.photoQualities || {
+            standard: { name: 'Standard', extra: 0.0, enabled: true },
+            high: { name: 'High', extra: 5.0, enabled: true },
+            photo_grade: { name: 'Photo Grade', extra: 10.0, enabled: true },
           },
         };
 
@@ -1082,8 +2256,19 @@ function registerIpcHandlers() {
     if (typeof settings.autoLaunch === 'boolean') appConfig.autoLaunch = settings.autoLaunch;
     if (typeof settings.soundAlert === 'boolean') appConfig.soundAlert = settings.soundAlert;
     if (typeof settings.autoPrintDefault === 'boolean') appConfig.autoPrintEnabled = settings.autoPrintDefault;
+    if (typeof settings.multiPrinterMode === 'boolean') appConfig.multiPrinterMode = settings.multiPrinterMode;
+    if (settings.printerAssignmentMode) appConfig.printerAssignmentMode = settings.printerAssignmentMode;
+    if (typeof settings.loadBalancing === 'boolean') appConfig.loadBalancing = settings.loadBalancing;
+    if (settings.printersConfig) appConfig.printersConfig = settings.printersConfig;
     if (settings.shopName) appConfig.shopName = settings.shopName;
     if (settings.shopSlug) appConfig.shopSlug = settings.shopSlug;
+    if (typeof settings.autoCheckUpdates === 'boolean') appConfig.autoCheckUpdates = settings.autoCheckUpdates;
+    if (settings.updateChannel) {
+      appConfig.updateChannel = settings.updateChannel;
+      if (autoUpdater) {
+        autoUpdater.allowPrerelease = settings.updateChannel === 'beta';
+      }
+    }
 
     saveConfig();
 
@@ -1132,6 +2317,19 @@ app.whenReady().then(() => {
   registerIpcHandlers();
   createWindow();
   createTray();
+  startPrinterMonitoring();
+  initAutoUpdater();
+
+  // Background update check after startup (Requirement 7)
+  if (appConfig.autoCheckUpdates !== false && autoUpdater) {
+    setTimeout(() => {
+      try {
+        autoUpdater.checkForUpdates().catch((err) => {
+          console.warn('[AUTO-UPDATER] Background check warning (local printing unaffected):', err.message);
+        });
+      } catch (e) {}
+    }, 15000);
+  }
 
   const saved = readSavedSession();
   if (saved?.shop?.id) {

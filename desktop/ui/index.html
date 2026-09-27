@@ -37,18 +37,41 @@
 
     <div class="titlebar-right">
       <button class="icon-btn tv-btn" id="btnOpenTvBoardTitle" title="Open Waiting Area TV Board">
-        <span>📺 TV Board</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="15" x="2" y="7" rx="2" ry="2"/><polyline points="17 2 12 7 7 2"/></svg>
+        <span>TV Board</span>
       </button>
       <button class="icon-btn qr-btn" id="btnShowCounterQR" title="Show Counter QR Code">
-        <span>📱 Counter QR</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="5" height="5" x="3" y="3" rx="1"/><rect width="5" height="5" x="16" y="3" rx="1"/><rect width="5" height="5" x="3" y="16" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/><path d="M21 12v.01"/><path d="M12 21v-1"/></svg>
+        <span>Counter QR</span>
       </button>
       <div class="window-controls">
-        <button class="win-btn win-min" id="winMinimize" title="Minimize">—</button>
-        <button class="win-btn win-max" id="winMaximize" title="Maximize">▢</button>
-        <button class="win-btn win-close" id="winClose" title="Close to Tray">✕</button>
+        <button class="win-btn win-min" id="winMinimize" title="Minimize">
+          <svg width="10" height="1" viewBox="0 0 10 1"><rect width="10" height="1" fill="currentColor"/></svg>
+        </button>
+        <button class="win-btn win-max" id="winMaximize" title="Maximize">
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.2"><rect width="9" height="9" x="0.5" y="0.5" rx="1"/></svg>
+        </button>
+        <button class="win-btn win-close" id="winClose" title="Close to Tray">
+          <svg width="10" height="10" viewBox="0 0 10 10" stroke="currentColor" stroke-width="1.3"><line x1="1" y1="1" x2="9" y2="9"/><line x1="9" y1="1" x2="1" y2="9"/></svg>
+        </button>
       </div>
     </div>
   </header>
+
+  <!-- UNOBTRUSIVE UPDATE BANNER (SHOWN WHEN PRODUCTION UPDATE IS DETECTED) -->
+  <div id="updateToastBanner" class="update-toast-banner" style="display:none;">
+    <div class="update-toast-content">
+      <span class="update-toast-icon">🚀</span>
+      <div class="update-toast-text">
+        <strong id="toastUpdateTitle">QuickPrint Counter OS Update Available</strong>
+        <p id="toastUpdateDesc">Current: <span id="toastCurVer">2.4.0</span> • Latest Production: <strong id="toastNewVer">2.4.1</strong></p>
+      </div>
+    </div>
+    <div class="update-toast-buttons">
+      <button class="btn btn-primary btn-xs" id="btnToastUpdateNow">Update Now</button>
+      <button class="btn btn-secondary btn-xs" id="btnToastDismiss">Later</button>
+    </div>
+  </div>
 
   <!-- MAIN APPLICATION SHELL -->
   <div class="app-shell" id="appShell">
@@ -64,32 +87,46 @@
 
       <nav class="sidebar-nav">
         <button class="nav-item active" data-view="queue">
-          <span class="nav-icon">📥</span>
+          <span class="nav-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+          </span>
           <span class="nav-label">Live Queue</span>
           <span class="nav-badge" id="queueBadge">0</span>
         </button>
         <button class="nav-item" data-view="history">
-          <span class="nav-icon">📑</span>
+          <span class="nav-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+          </span>
           <span class="nav-label">Print Jobs Log</span>
         </button>
         <button class="nav-item" data-view="printers">
-          <span class="nav-icon">🖨️</span>
+          <span class="nav-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect width="12" height="8" x="6" y="14"/></svg>
+          </span>
           <span class="nav-label">Printers & Spooler</span>
         </button>
         <button class="nav-item" data-view="tv">
-          <span class="nav-icon">📺</span>
+          <span class="nav-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="15" x="2" y="7" rx="2" ry="2"/><polyline points="17 2 12 7 7 2"/></svg>
+          </span>
           <span class="nav-label">Waiting Area TV</span>
         </button>
         <button class="nav-item" data-view="financials">
-          <span class="nav-icon">💰</span>
+          <span class="nav-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+          </span>
           <span class="nav-label">Daily Earnings</span>
         </button>
         <button class="nav-item" data-view="pricing">
-          <span class="nav-icon">🏷️</span>
+          <span class="nav-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2H2v10l9.29 9.29c.94.94 2.48.94 3.42 0l6.58-6.58c.94-.94.94-2.48 0-3.42L12 2Z"/><path d="M7 7h.01"/></svg>
+          </span>
           <span class="nav-label">Pricing Catalog</span>
         </button>
         <button class="nav-item" data-view="settings">
-          <span class="nav-icon">⚙️</span>
+          <span class="nav-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+          </span>
           <span class="nav-label">Counter Settings</span>
         </button>
       </nav>
@@ -108,7 +145,9 @@
             <span class="user-email" id="ownerEmailDisplay">owner@quickprint.in</span>
             <span class="user-role">Shop Manager</span>
           </div>
-          <button class="btn-logout" id="btnLogout" title="Sign Out">🚪</button>
+          <button class="btn-logout" id="btnLogout" title="Sign Out">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          </button>
         </div>
       </div>
     </aside>
@@ -154,6 +193,20 @@
             <div class="metric-value" id="kpiSpoolerState">READY</div>
             <div class="metric-sub" id="kpiDefaultPrinterSub">Windows Spooler Idle</div>
           </div>
+        </div>
+
+        <!-- MULTI-PRINTER LIVE QUEUES SUMMARY (Active when Multi-Printer Mode is ON) -->
+        <div class="multi-printer-summary-bar" id="multiPrinterQueueSummary" style="display:none;">
+          <div class="multi-printer-summary-left">
+            <div class="printer-summary-icon">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect width="12" height="8" x="6" y="14"/></svg>
+            </div>
+            <span class="multi-printer-summary-title">Printers:</span>
+            <div class="multi-printer-pills-row" id="multiPrinterSummaryPills">
+              <!-- Rendered via JS -->
+            </div>
+          </div>
+          <button class="btn btn-secondary btn-xs" id="btnManagePrintersShortcut">⚙️ Manage Routing</button>
         </div>
 
         <!-- QUEUE CONTROLS HEADER -->
@@ -235,11 +288,68 @@
         <div class="view-header">
           <div>
             <h1 class="view-title">Printers & Hardware Manager</h1>
-            <p class="view-subtitle">Direct Windows OS spooler integration and printer routing</p>
+            <p class="view-subtitle">Direct Windows OS spooler integration, real-time health monitoring, and hardware routing</p>
           </div>
           <button class="btn btn-primary btn-sm" id="btnScanPrinters">
-            <span>🔍 Scan Windows Printers</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>
+            <span>Scan Windows Printers</span>
           </button>
+        </div>
+
+        <!-- LIVE PERSISTENT PRINTER OFFLINE WARNING BANNER -->
+        <div id="printerOfflineAlertBanner" class="alert-banner-offline" style="display:none;">
+          <div class="alert-banner-left">
+            <div class="alert-icon-circle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            </div>
+            <div>
+              <strong class="alert-banner-title" id="offlineBannerTitle">Printer Offline / Disconnected</strong>
+              <p class="alert-banner-desc" id="offlineBannerDesc">Please connect your printer via USB or Wi-Fi to continue printing.</p>
+            </div>
+          </div>
+          <button class="btn btn-secondary btn-sm btn-retry-offline" id="btnRetryPrinterConnection">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>
+            <span>Retry Connection</span>
+          </button>
+        </div>
+
+        <!-- HARDWARE HEALTH & SPOOLER DIAGNOSTICS CARD -->
+        <div class="diagnostics-hero-card">
+          <div class="diagnostics-header">
+            <div class="diagnostics-title-group">
+              <div class="diag-icon-badge">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+              </div>
+              <div>
+                <h3 class="diagnostics-title">Printer Health & Spooler Diagnostics</h3>
+                <span class="diagnostics-sub">Live Windows Spooler Service Status</span>
+              </div>
+            </div>
+            <span id="diagnosticHealthBadge" class="badge-chip green">● ONLINE & READY</span>
+          </div>
+          <div class="diagnostics-tiles-grid">
+            <div class="diag-tile">
+              <span class="diag-label">Active Device</span>
+              <strong id="diagPrinterName" class="diag-value">Detecting...</strong>
+            </div>
+            <div class="diag-tile">
+              <span class="diag-label">Connection State</span>
+              <strong id="diagPrinterConn" class="diag-value diag-status-green">Online & Ready</strong>
+            </div>
+            <div class="diag-tile">
+              <span class="diag-label">Spooler Queue</span>
+              <strong id="diagQueueCount" class="diag-value">0 in queue</strong>
+            </div>
+            <div class="diag-tile">
+              <span class="diag-label">Last Health Check</span>
+              <strong id="diagLastCheck" class="diag-value">Just now</strong>
+            </div>
+          </div>
+        </div>
+
+        <div class="printers-grid-header">
+          <h3 class="section-title">Installed Windows Printers</h3>
+          <span class="section-badge" id="printersCountBadge">Available Hardware</span>
         </div>
 
         <div class="printers-grid" id="printersGrid">
@@ -247,14 +357,51 @@
         </div>
 
         <div class="printer-test-panel">
-          <h3>Hardware Spooler Diagnostics</h3>
-          <p>Send a real test ticket to verify page alignment, paper feeding, and spool speed.</p>
+          <div class="test-panel-header">
+            <div class="test-icon-badge">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect width="12" height="8" x="6" y="14"/></svg>
+            </div>
+            <div>
+              <h3>Hardware Spooler Diagnostics</h3>
+              <p>Send a real Windows test ticket to verify paper feeding, alignment, and spool latency.</p>
+            </div>
+          </div>
           <div class="test-controls-row">
             <select class="select-input" id="testPrinterSelect">
               <option value="">Select target printer...</option>
             </select>
-            <button class="btn btn-secondary" id="btnSendTestPrint">
-              🖨️ Send Hardware Test Page
+            <button class="btn btn-primary" id="btnSendTestPrint">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect width="12" height="8" x="6" y="14"/></svg>
+              <span>Send Hardware Test Page</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- CUSTOMER MEDIA PRIVACY & LOCAL STORAGE -->
+        <div class="card-panel privacy-panel">
+          <div class="privacy-header">
+            <div>
+              <div class="privacy-title-row">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-blue-600"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                <h3>Customer Media Privacy & Local Storage</h3>
+              </div>
+              <p class="privacy-desc">
+                Customer files are purged from cloud storage immediately after verified download. Active files are stored locally for reprint and can be cleared once completed.
+              </p>
+            </div>
+            <div class="storage-metrics-box">
+              <span id="mediaStorageUsed" class="storage-number">0.00 MB</span>
+              <span id="mediaStorageCount" class="storage-sub">0 files cached locally</span>
+            </div>
+          </div>
+          <div class="privacy-actions">
+            <button class="btn btn-secondary btn-sm" id="btnClearPrintedMedia">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+              <span>Clear Printed Cache</span>
+            </button>
+            <button class="btn btn-secondary btn-sm" id="btnRefreshMediaStats">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>
+              <span>Refresh Stats</span>
             </button>
           </div>
         </div>
@@ -397,109 +544,282 @@
       <section class="content-view" id="view-pricing">
         <div class="view-header">
           <div>
-            <h1 class="view-title">Pricing Catalog & Rate Card</h1>
-            <p class="view-subtitle">Set your shop's print rates shown on the customer kiosk scan screen</p>
+            <h1 class="view-title">Authoritative Pricing Catalog & Rate Card</h1>
+            <p class="view-subtitle">Single source of truth for both Customer Web Kiosk and Desktop Counter OS</p>
           </div>
           <button class="btn btn-primary btn-sm" id="btnSavePricing">
             💾 Save Rates to Cloud
           </button>
         </div>
 
-        <div class="pricing-cards-grid">
-          <div class="pricing-card">
-            <div class="pricing-card-header">
-              <h3>Black & White Printing</h3>
-              <span class="badge-chip">Standard Laser</span>
-            </div>
-            <div class="pricing-field">
-              <label>Single Sided (per page)</label>
-              <div class="input-currency">
-                <span>₹</span>
-                <input type="number" id="rateBwSingle" value="2.00" step="0.5">
+        <div style="margin-bottom: 20px;">
+          <h2 style="font-size: 16px; font-weight: 800; color: var(--text-primary); margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+            📄 Document Printing Configuration
+          </h2>
+          <div class="pricing-cards-grid">
+            <div class="pricing-card">
+              <div class="pricing-card-header">
+                <h3>Black & White Printing</h3>
+                <span class="badge-chip">Base Document</span>
+              </div>
+              <div class="pricing-field">
+                <label>Single Sided (per page)</label>
+                <div class="input-currency">
+                  <span>₹</span>
+                  <input type="number" id="rateBwSingle" value="2.00" step="0.5">
+                </div>
+              </div>
+              <div class="pricing-field">
+                <label>Double Sided / Duplex (per sheet)</label>
+                <div class="input-currency">
+                  <span>₹</span>
+                  <input type="number" id="rateBwDouble" value="3.00" step="0.5">
+                </div>
               </div>
             </div>
-            <div class="pricing-field">
-              <label>Double Sided (per sheet - both sides)</label>
-              <div class="input-currency">
-                <span>₹</span>
-                <input type="number" id="rateBwDouble" value="3.00" step="0.5">
+
+            <div class="pricing-card">
+              <div class="pricing-card-header">
+                <h3>Full Color Printing</h3>
+                <span class="badge-chip color">Color Laser / Inkjet</span>
+              </div>
+              <div class="pricing-field">
+                <label>Single Sided (per page)</label>
+                <div class="input-currency">
+                  <span>₹</span>
+                  <input type="number" id="rateColorSingle" value="10.00" step="1.0">
+                </div>
+              </div>
+              <div class="pricing-field">
+                <label>Double Sided / Duplex (per sheet)</label>
+                <div class="input-currency">
+                  <span>₹</span>
+                  <input type="number" id="rateColorDouble" value="18.00" step="1.0">
+                </div>
+              </div>
+            </div>
+
+            <div class="pricing-card">
+              <div class="pricing-card-header">
+                <h3>Document Paper Sizes</h3>
+                <span class="badge-chip">Extra per sheet</span>
+              </div>
+              <div class="pricing-field">
+                <label>A4 Standard Sheet (Base)</label>
+                <div class="input-currency">
+                  <span>₹</span>
+                  <input type="number" id="ratePaperA4" value="0.00" disabled style="opacity:0.6; cursor:not-allowed;">
+                </div>
+              </div>
+              <div class="pricing-field">
+                <label>A3 Poster Sheet (Extra)</label>
+                <div class="input-currency">
+                  <span>+ ₹</span>
+                  <input type="number" id="ratePaperA3" value="4.00" step="1.0" min="0">
+                </div>
+              </div>
+              <div class="pricing-field">
+                <label>Legal / Bond Paper (Extra)</label>
+                <div class="input-currency">
+                  <span>+ ₹</span>
+                  <input type="number" id="ratePaperLegal" value="2.00" step="0.5" min="0">
+                </div>
+              </div>
+              <div class="pricing-field">
+                <label>A5 Mini Book Sheet (Extra)</label>
+                <div class="input-currency">
+                  <span>+ ₹</span>
+                  <input type="number" id="ratePaperA5" value="0.00" step="0.5" min="0">
+                </div>
+              </div>
+            </div>
+
+            <div class="pricing-card">
+              <div class="pricing-card-header">
+                <h3>Document Paper Types</h3>
+                <span class="badge-chip color">Material Surcharge</span>
+              </div>
+              <div class="pricing-field">
+                <label>Plain Paper (Standard 75 GSM)</label>
+                <div class="input-currency">
+                  <span>₹</span>
+                  <input type="number" id="rateTypePlain" value="0.00" disabled style="opacity:0.6; cursor:not-allowed;">
+                </div>
+              </div>
+              <div class="pricing-field">
+                <label>Bond Paper 85-100 GSM (+ extra)</label>
+                <div class="input-currency">
+                  <span>+ ₹</span>
+                  <input type="number" id="rateTypeBond" value="2.00" step="0.5" min="0">
+                </div>
+              </div>
+              <div class="pricing-field">
+                <label>Glossy Finish (+ extra)</label>
+                <div class="input-currency">
+                  <span>+ ₹</span>
+                  <input type="number" id="rateTypeGlossy" value="10.00" step="1.0" min="0">
+                </div>
+              </div>
+              <div class="pricing-field">
+                <label>Matte Paper (+ extra)</label>
+                <div class="input-currency">
+                  <span>+ ₹</span>
+                  <input type="number" id="rateTypeMatte" value="8.00" step="1.0" min="0">
+                </div>
+              </div>
+            </div>
+
+            <div class="pricing-card">
+              <div class="pricing-card-header">
+                <h3>Document Quality</h3>
+                <span class="badge-chip">DPI & Ink Density</span>
+              </div>
+              <div class="pricing-field">
+                <label>Normal (Standard DPI)</label>
+                <div class="input-currency">
+                  <span>₹</span>
+                  <input type="number" id="rateQualityNormal" value="0.00" disabled style="opacity:0.6; cursor:not-allowed;">
+                </div>
+              </div>
+              <div class="pricing-field">
+                <label>High (Fine Resolution)</label>
+                <div class="input-currency">
+                  <span>+ ₹</span>
+                  <input type="number" id="rateQualityHigh" value="2.00" step="0.5" min="0">
+                </div>
+              </div>
+              <div class="pricing-field">
+                <label>Photo Grade (Ultra Sharp)</label>
+                <div class="input-currency">
+                  <span>+ ₹</span>
+                  <input type="number" id="rateQualityPhotoGrade" value="8.00" step="1.0" min="0">
+                </div>
+              </div>
+            </div>
+
+            <div class="pricing-card">
+              <div class="pricing-card-header">
+                <h3>Finishing & Services</h3>
+                <span class="badge-chip">Counter Add-ons</span>
+              </div>
+              <div class="pricing-field">
+                <label>Spiral Binding (per booklet)</label>
+                <div class="input-currency">
+                  <span>₹</span>
+                  <input type="number" id="rateSpiralBinding" value="30.00" step="5.0">
+                </div>
+              </div>
+              <div class="pricing-field">
+                <label>Corner Stapling (flat fee)</label>
+                <div class="input-currency">
+                  <span>₹</span>
+                  <input type="number" id="rateStapling" value="2.00" step="1.0">
+                </div>
               </div>
             </div>
           </div>
+        </div>
 
-          <div class="pricing-card">
-            <div class="pricing-card-header">
-              <h3>Full Color Printing</h3>
-              <span class="badge-chip color">Inkjet / Color Laser</span>
-            </div>
-            <div class="pricing-field">
-              <label>Single Sided (per page)</label>
-              <div class="input-currency">
-                <span>₹</span>
-                <input type="number" id="rateColorSingle" value="10.00" step="1.0">
+        <div style="margin-top: 24px;">
+          <h2 style="font-size: 16px; font-weight: 800; color: var(--text-primary); margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+            🖼️ Dedicated Photo Printing Configuration
+          </h2>
+          <div class="pricing-cards-grid">
+            <div class="pricing-card">
+              <div class="pricing-card-header">
+                <h3>Photo Sizes (Base Rate)</h3>
+                <span class="badge-chip color">Standard Lab Sizes</span>
+              </div>
+              <div class="pricing-field">
+                <label>4 × 6 inch (Standard Postcard)</label>
+                <div class="input-currency">
+                  <span>₹</span>
+                  <input type="number" id="ratePhoto4x6" value="15.00" step="1.0" min="0">
+                </div>
+              </div>
+              <div class="pricing-field">
+                <label>5 × 7 inch (Medium Portrait)</label>
+                <div class="input-currency">
+                  <span>₹</span>
+                  <input type="number" id="ratePhoto5x7" value="25.00" step="1.0" min="0">
+                </div>
+              </div>
+              <div class="pricing-field">
+                <label>6 × 8 inch (Large Studio)</label>
+                <div class="input-currency">
+                  <span>₹</span>
+                  <input type="number" id="ratePhoto6x8" value="35.00" step="1.0" min="0">
+                </div>
+              </div>
+              <div class="pricing-field">
+                <label>Passport Photo (8× Sheet)</label>
+                <div class="input-currency">
+                  <span>₹</span>
+                  <input type="number" id="ratePhotoPassport" value="35.00" step="1.0" min="0">
+                </div>
+              </div>
+              <div class="pricing-field">
+                <label>A4 Full Photo Print</label>
+                <div class="input-currency">
+                  <span>₹</span>
+                  <input type="number" id="ratePhotoA4" value="50.00" step="5.0" min="0">
+                </div>
               </div>
             </div>
-            <div class="pricing-field">
-              <label>Double Sided (per sheet - both sides)</label>
-              <div class="input-currency">
-                <span>₹</span>
-                <input type="number" id="rateColorDouble" value="18.00" step="1.0">
-              </div>
-            </div>
-          </div>
 
-          <div class="pricing-card">
-            <div class="pricing-card-header">
-              <h3>Finishing & Services</h3>
-              <span class="badge-chip">Counter Add-ons</span>
-            </div>
-            <div class="pricing-field">
-              <label>Spiral Binding (per booklet)</label>
-              <div class="input-currency">
-                <span>₹</span>
-                <input type="number" id="rateSpiralBinding" value="30.00" step="5.0">
+            <div class="pricing-card">
+              <div class="pricing-card-header">
+                <h3>Photo Paper Types</h3>
+                <span class="badge-chip color">Paper Surcharge</span>
+              </div>
+              <div class="pricing-field">
+                <label>Glossy Photo Paper (Base)</label>
+                <div class="input-currency">
+                  <span>₹</span>
+                  <input type="number" id="ratePhotoPaperGlossy" value="0.00" disabled style="opacity:0.6; cursor:not-allowed;">
+                </div>
+              </div>
+              <div class="pricing-field">
+                <label>Matte Velvet Paper (+ extra)</label>
+                <div class="input-currency">
+                  <span>+ ₹</span>
+                  <input type="number" id="ratePhotoPaperMatte" value="5.00" step="1.0" min="0">
+                </div>
+              </div>
+              <div class="pricing-field">
+                <label>Premium Lustre Paper (+ extra)</label>
+                <div class="input-currency">
+                  <span>+ ₹</span>
+                  <input type="number" id="ratePhotoPaperPremium" value="10.00" step="1.0" min="0">
+                </div>
               </div>
             </div>
-            <div class="pricing-field">
-              <label>Corner Stapling (flat fee)</label>
-              <div class="input-currency">
-                <span>₹</span>
-                <input type="number" id="rateStapling" value="2.00" step="1.0">
-              </div>
-            </div>
-          </div>
 
-          <div class="pricing-card">
-            <div class="pricing-card-header">
-              <h3>Paper Sizes & Media Types</h3>
-              <span class="badge-chip color">Kiosk Sheet Options</span>
-            </div>
-            <div class="pricing-field">
-              <label>A4 Standard Sheet (Base paper)</label>
-              <div class="input-currency">
-                <span>₹</span>
-                <input type="number" id="ratePaperA4" value="0.00" disabled style="opacity:0.6; cursor:not-allowed;" title="A4 Standard is included in base print rate">
+            <div class="pricing-card">
+              <div class="pricing-card-header">
+                <h3>Photo Grade Quality</h3>
+                <span class="badge-chip">Color Reproduction</span>
               </div>
-            </div>
-            <div class="pricing-field">
-              <label>A3 Poster Sheet (Extra per sheet)</label>
-              <div class="input-currency">
-                <span>+ ₹</span>
-                <input type="number" id="ratePaperA3" value="4.00" step="1.0" min="0">
+              <div class="pricing-field">
+                <label>Standard (Standard Lab)</label>
+                <div class="input-currency">
+                  <span>₹</span>
+                  <input type="number" id="ratePhotoQualityStandard" value="0.00" disabled style="opacity:0.6; cursor:not-allowed;">
+                </div>
               </div>
-            </div>
-            <div class="pricing-field">
-              <label>Legal / Bond Paper (Extra per sheet)</label>
-              <div class="input-currency">
-                <span>+ ₹</span>
-                <input type="number" id="ratePaperLegal" value="2.00" step="0.5" min="0">
+              <div class="pricing-field">
+                <label>High Definition (+ extra)</label>
+                <div class="input-currency">
+                  <span>+ ₹</span>
+                  <input type="number" id="ratePhotoQualityHigh" value="5.00" step="1.0" min="0">
+                </div>
               </div>
-            </div>
-            <div class="pricing-field">
-              <label>Passport Photo (8×) (Glossy Sheet Extra)</label>
-              <div class="input-currency">
-                <span>+ ₹</span>
-                <input type="number" id="ratePaperPassport" value="35.00" step="5.0" min="0">
+              <div class="pricing-field">
+                <label>Photo Grade Studio 4800 DPI (+ extra)</label>
+                <div class="input-currency">
+                  <span>+ ₹</span>
+                  <input type="number" id="ratePhotoQualityStudio" value="10.00" step="1.0" min="0">
+                </div>
               </div>
             </div>
           </div>
@@ -517,6 +837,77 @@
         </div>
 
         <div class="settings-sections">
+          <!-- SOFTWARE RELEASES & AUTO-UPDATES (Requirements 7, 8, 9, 22) -->
+          <div class="settings-group" id="settingsGroupUpdates">
+            <div class="settings-group-header-row">
+              <div>
+                <h3>Software Releases & Auto-Updates</h3>
+                <p class="setting-desc">Official production release pipeline and in-place desktop application updates.</p>
+              </div>
+              <span class="badge-chip color" id="updateStatusBadge">UP TO DATE</span>
+            </div>
+
+            <div class="setting-item">
+              <div class="setting-info">
+                <span class="setting-title">QuickPrint Counter OS</span>
+                <span class="setting-desc" id="settingsCurrentVersionDesc">Installed Version: <strong id="lblInstalledVersion">2.4.0</strong></span>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <button class="btn btn-secondary btn-sm" id="btnCheckForUpdates">Check for Updates</button>
+              </div>
+            </div>
+
+            <div class="setting-item">
+              <div class="setting-info">
+                <span class="setting-title">Automatically Check for Updates</span>
+                <span class="setting-desc">Periodically verify new production versions in the background</span>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="cfgAutoCheckUpdates" checked>
+                <span class="slider"></span>
+              </label>
+            </div>
+
+            <div class="setting-item">
+              <div class="setting-info">
+                <span class="setting-title">Update Channel</span>
+                <span class="setting-desc">Stable enterprise production releases (recommended) or staging beta</span>
+              </div>
+              <select class="select-input" id="cfgUpdateChannel" style="max-width: 200px;">
+                <option value="stable">Stable (Production)</option>
+                <option value="beta">Beta (Staging / Testers)</option>
+              </select>
+            </div>
+
+            <!-- DYNAMIC UPDATE ACTION PANEL -->
+            <div id="updateActionPanel" style="display:none; margin-top:14px; padding:14px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:10px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:8px;">
+                <div>
+                  <strong id="updatePanelTitle" style="font-size:14px; color:var(--text-main);">Update Available</strong>
+                  <p id="updatePanelSubtitle" style="font-size:12px; color:var(--text-muted); margin-top:2px;">Version 2.4.1 is available for installation.</p>
+                </div>
+                <div style="display:flex; gap:8px;" id="updatePanelActions">
+                  <button class="btn btn-primary btn-sm" id="btnUpdateDownload">Download Update</button>
+                  <button class="btn btn-success btn-sm" id="btnUpdateInstall" style="display:none;">Restart & Install</button>
+                </div>
+              </div>
+              <!-- Download Progress Bar -->
+              <div id="updateProgressBarContainer" style="display:none; margin-top:10px;">
+                <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--text-muted); margin-bottom:4px;">
+                  <span id="updateProgressLabel">Downloading: 0%</span>
+                  <span id="updateProgressSpeed">0 KB/s</span>
+                </div>
+                <div style="width:100%; height:6px; background:var(--border-subtle); border-radius:3px; overflow:hidden;">
+                  <div id="updateProgressBarFill" style="width:0%; height:100%; background:var(--color-primary); transition:width 0.2s ease;"></div>
+                </div>
+              </div>
+              <!-- Printing Deferred Notice (Requirement 9) -->
+              <div id="updatePrintNotice" style="display:none; margin-top:10px; padding:8px 12px; background:#FEF3C7; border:1px solid #F59E0B; border-radius:6px; font-size:12px; color:#92400E; font-weight:600;">
+                ⚠️ Print job actively in progress — update is safely held and will install automatically once current prints finish.
+              </div>
+            </div>
+          </div>
+
           <div class="settings-group">
             <h3>Windows System Integration</h3>
             <div class="setting-item">
@@ -550,6 +941,53 @@
                 <input type="checkbox" id="cfgAutoPrintDefault">
                 <span class="slider"></span>
               </label>
+            </div>
+          </div>
+
+          <!-- MULTI-PRINTER MANAGEMENT (Requirement 8, 14, 16, 18, 24, 41) -->
+          <div class="settings-group">
+            <div class="settings-group-header-row">
+              <div>
+                <h3>Multi-Printer Management & Routing</h3>
+                <p class="setting-desc">Advanced mode for professional print shops with multiple printers, photo labs, and plotters.</p>
+              </div>
+              <span class="badge-chip" id="multiPrinterModeBadge">SINGLE PRINTER MODE</span>
+            </div>
+
+            <div class="setting-item">
+              <div class="setting-info">
+                <span class="setting-title">Advanced Multi-Printer Mode</span>
+                <span class="setting-desc">Enable multi-device routing, capability matching, load balancing, and per-printer queues</span>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="cfgMultiPrinterMode">
+                <span class="slider"></span>
+              </label>
+            </div>
+
+            <div id="multiPrinterSubSettings" style="display:none; margin-top:14px; border-top:1px dashed var(--border-subtle); padding-top:14px;">
+              <div class="setting-item">
+                <div class="setting-info">
+                  <span class="setting-title">Printer Assignment Mode</span>
+                  <span class="setting-desc">Choose how incoming customer orders are routed to compatible printers</span>
+                </div>
+                <select class="select-input" id="cfgPrinterAssignmentMode" style="max-width: 250px;">
+                  <option value="auto">Automatic (System routes best printer)</option>
+                  <option value="override">Automatic with Manual Override</option>
+                  <option value="manual">Manual (Counter manager selects per order)</option>
+                </select>
+              </div>
+
+              <div class="setting-item">
+                <div class="setting-info">
+                  <span class="setting-title">Intelligent Load Balancing</span>
+                  <span class="setting-desc">Distribute orders across identical/compatible printers based on active spooler queue depth</span>
+                </div>
+                <label class="switch">
+                  <input type="checkbox" id="cfgLoadBalancing" checked>
+                  <span class="slider"></span>
+                </label>
+              </div>
             </div>
           </div>
 
@@ -671,42 +1109,232 @@
     </div>
   </div>
 
-  <!-- COUNTER QR STANDEE MODAL -->
+  <!-- COUNTER QR STANDEE MODAL (Requirement 29-33) -->
   <div class="modal-overlay" id="qrModal">
     <div class="modal-card qr-modal-card">
       <div class="modal-header">
-        <h3>Customer Counter QR Code</h3>
+        <div class="qr-modal-header-left">
+          <h3>Customer Counter QR Standee</h3>
+          <span class="badge-chip green">HIGH-RES READY</span>
+        </div>
         <button class="modal-close" id="btnCloseQrModal">✕</button>
       </div>
-      <div class="modal-body text-center">
-        <p class="qr-instruction">Display this on your counter or print it as a standee for customers to scan & upload documents.</p>
-        <div class="qr-display-box" id="qrContainer" style="background:#FFFFFF; padding:16px; border-radius:12px; border:2px solid var(--border-strong); display:inline-block; margin-bottom:14px;">
-          <img id="qrImageDisplay" src="https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=4&data=https://doc2print.vercel.app/kiosk/counter" alt="Customer Scan QR Code" style="width:220px; height:220px; display:block; border-radius:4px;">
-        </div>
-        <div class="qr-url-badge" id="qrUrlBadge" style="font-family:monospace; font-weight:700; color:var(--primary); font-size:13px; background:var(--bg-subtle); padding:8px 14px; border-radius:6px; border:1px solid var(--border-subtle); word-break:break-all;">
-          https://doc2print.vercel.app/kiosk/counter
+      <div class="modal-body qr-modal-body">
+        <!-- Physical Counter Standee Printable Card Mockup -->
+        <div class="counter-standee-preview" id="counterStandeeCard">
+          <div class="standee-acrylic-top">
+            <div class="standee-brand-pill">
+              <span class="standee-logo-icon">🖨️</span>
+              <span class="standee-brand-text">GAURPRINT</span>
+            </div>
+            <h2 class="standee-tagline">SCAN TO PRINT</h2>
+            <p class="standee-subtext">Upload documents & photos directly from your phone</p>
+          </div>
+
+          <div class="standee-qr-frame">
+            <div class="standee-qr-quiet-zone">
+              <img id="qrImageDisplay" src="" alt="Customer Scan QR Code" class="standee-qr-img">
+            </div>
+          </div>
+
+          <div class="standee-instructions-box">
+            <div class="standee-step">
+              <span class="step-num">1</span>
+              <span class="step-text">Scan with phone</span>
+            </div>
+            <span class="step-arrow">→</span>
+            <div class="standee-step">
+              <span class="step-num">2</span>
+              <span class="step-text">Upload file</span>
+            </div>
+            <span class="step-arrow">→</span>
+            <div class="standee-step">
+              <span class="step-num">3</span>
+              <span class="step-text">Collect print</span>
+            </div>
+          </div>
+
+          <div class="standee-shop-footer">
+            <div class="standee-shop-name" id="standeeShopNameDisplay">Mahadev Printer Shop</div>
+            <div class="standee-shop-url" id="qrUrlBadge">https://doc2print.vercel.app/kiosk/counter</div>
+          </div>
         </div>
       </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" id="btnCopyKioskUrl">📋 Copy Link</button>
-        <button class="btn btn-primary" id="btnPrintStandee">🖨️ Print Counter Standee</button>
+      <div class="modal-footer qr-modal-footer">
+        <button class="btn btn-secondary btn-sm" id="btnCopyKioskUrl">📋 Copy URL</button>
+        <button class="btn btn-secondary btn-sm" id="btnDownloadQrSvg">📥 Download SVG</button>
+        <button class="btn btn-secondary btn-sm" id="btnDownloadQrPng">📥 Download PNG</button>
+        <button class="btn btn-primary btn-sm" id="btnPrintStandee">🖨️ Print Standee</button>
       </div>
     </div>
   </div>
 
-  <!-- QUICK PDF PREVIEW MODAL -->
+  <!-- ADVANCED DOCUMENT & PHOTO PREVIEW MODAL (Requirement 1-7, 34-35) -->
   <div class="modal-overlay" id="previewModal">
     <div class="modal-card preview-modal-card">
-      <div class="modal-header">
-        <h3 id="previewTitle">Document Preview — Token #A-101</h3>
-        <button class="modal-close" id="btnClosePreviewModal">✕</button>
+      <div class="modal-header preview-modal-header">
+        <div class="preview-header-meta">
+          <h3 id="previewTitle">Document Preview — Token #01</h3>
+          <span class="preview-mode-tag" id="previewModeTag">Document (A4)</span>
+        </div>
+        <div class="preview-header-right">
+          <span class="preview-orientation-pill" id="previewOrientationPill">📄 Portrait Paper</span>
+          <button class="modal-close" id="btnClosePreviewModal">✕</button>
+        </div>
       </div>
+
       <div class="modal-body preview-body" id="previewBody">
-        <iframe id="previewIframe" src="about:blank"></iframe>
+        <!-- PDF Document iframe Viewer -->
+        <iframe id="previewIframe" src="about:blank" style="display:block;"></iframe>
+
+        <!-- Responsive Auto-Fit Paper Sheet Image Viewer (Zero Internal Scrolling) -->
+        <div id="imagePreviewContainer" class="image-preview-container" style="display:none;">
+          <div id="paperSheet" class="preview-paper-sheet orientation-portrait">
+            <img id="previewImg" class="preview-fitted-img" src="" alt="Customer Media Print Preview">
+            <div class="paper-watermark" id="paperWatermarkText">A4 • Portrait</div>
+          </div>
+        </div>
+
+        <!-- Purged / Deleted Media Graceful Notice -->
+        <div id="previewDeletedNotice" class="preview-deleted-notice" style="display:none;">
+          <div class="deleted-notice-card">
+            <div class="deleted-notice-icon">🔒</div>
+            <h3 id="deletedNoticeTitle">Media file is no longer available</h3>
+            <p id="deletedNoticeDesc">This customer media file was securely purged from temporary storage in accordance with data privacy and retention policies. All order, payment, and transaction records remain permanently saved.</p>
+          </div>
+        </div>
       </div>
+
+      <div class="modal-footer preview-modal-footer">
+        <div class="preview-footer-left">
+          <div class="preview-footer-filename" id="previewFileName">document.pdf</div>
+          <div class="preview-specs" id="previewSpecs">A4 • Color • Single-Sided • 1 Copy • Portrait</div>
+        </div>
+        <div class="preview-footer-actions">
+          <button class="btn btn-secondary" id="btnPreviewDownload">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            <span>Download</span>
+          </button>
+          <button class="btn btn-primary" id="btnPreviewPrintNow">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect width="12" height="8" x="6" y="14"/></svg>
+            <span>Print Now (Enter)</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PRINTER CONFIGURATION & ROUTING MODAL (Requirement 9, 10, 11, 12, 22) -->
+  <div class="modal-overlay" id="printerConfigModal">
+    <div class="modal-card printer-config-modal-card">
+      <div class="modal-header">
+        <div>
+          <h3 id="cfgModalPrinterTitle">Configure Printer Capabilities</h3>
+          <p class="modal-subtitle" id="cfgModalPrinterSub">Windows Hardware Driver: HP DeskJet 2800 series</p>
+        </div>
+        <button class="modal-close" id="btnClosePrinterConfigModal">✕</button>
+      </div>
+
+      <div class="modal-body printer-config-body">
+        <form id="printerConfigForm" onsubmit="return false;">
+          <div class="config-row-cols">
+            <div class="form-group flex-1">
+              <label>Custom Display Name</label>
+              <input type="text" class="text-input" id="cfgPrinterCustomName" placeholder="e.g. Counter Laser 1">
+            </div>
+            <div class="form-group flex-1">
+              <label>Printer Classification / Type</label>
+              <select class="select-input" id="cfgPrinterType">
+                <option value="document">General Document Printer</option>
+                <option value="bw">B&W Monochrome Laser</option>
+                <option value="color">Color Document Printer</option>
+                <option value="photo">Dedicated Photo Printer</option>
+                <option value="large_format">Large Format Plotter</option>
+                <option value="specialized">Specialized Printer</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Routing Priority</label>
+              <select class="select-input" id="cfgPrinterPriority">
+                <option value="1">Priority 1 (Highest)</option>
+                <option value="2">Priority 2 (Standard)</option>
+                <option value="3">Priority 3 (Backup)</option>
+                <option value="4">Priority 4 (Overflow)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="config-toggle-panel">
+            <div class="setting-item" style="padding:0; border:none;">
+              <div class="setting-info">
+                <strong style="color:var(--text-primary); font-size:13px;">Enable for Order Routing</strong>
+                <span class="setting-desc" style="margin-top:2px;">When enabled, automatic routing engine can send jobs to this printer.</span>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="cfgPrinterRoutingEnabled" checked>
+                <span class="slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <div class="capabilities-matrix-section">
+            <div class="matrix-header-row">
+              <strong style="font-size:13px; color:var(--text-primary);">Shop Routing Capabilities</strong>
+              <span class="setting-desc">Enable or restrict capabilities for this specific hardware device</span>
+            </div>
+
+            <div class="capabilities-checkbox-grid">
+              <label class="cap-checkbox-item">
+                <input type="checkbox" id="cap_a4" checked>
+                <span class="cap-name">A4 Paper</span>
+              </label>
+              <label class="cap-checkbox-item">
+                <input type="checkbox" id="cap_a3">
+                <span class="cap-name">A3 Paper</span>
+              </label>
+              <label class="cap-checkbox-item">
+                <input type="checkbox" id="cap_a5" checked>
+                <span class="cap-name">A5 Paper</span>
+              </label>
+              <label class="cap-checkbox-item">
+                <input type="checkbox" id="cap_legal">
+                <span class="cap-name">Legal / Custom</span>
+              </label>
+              <label class="cap-checkbox-item">
+                <input type="checkbox" id="cap_color" checked>
+                <span class="cap-name">Color Printing</span>
+              </label>
+              <label class="cap-checkbox-item">
+                <input type="checkbox" id="cap_bw" checked>
+                <span class="cap-name">B&W Monochrome</span>
+              </label>
+              <label class="cap-checkbox-item">
+                <input type="checkbox" id="cap_duplex">
+                <span class="cap-name">Duplex (Double Sided)</span>
+              </label>
+              <label class="cap-checkbox-item">
+                <input type="checkbox" id="cap_photo_4x6">
+                <span class="cap-name">Photo 4 × 6 inch</span>
+              </label>
+              <label class="cap-checkbox-item">
+                <input type="checkbox" id="cap_photo_5x7">
+                <span class="cap-name">Photo 5 × 7 inch</span>
+              </label>
+              <label class="cap-checkbox-item">
+                <input type="checkbox" id="cap_borderless">
+                <span class="cap-name">Borderless Printing</span>
+              </label>
+            </div>
+          </div>
+        </form>
+      </div>
+
       <div class="modal-footer">
-        <div class="preview-specs" id="previewSpecs">12 Pages • B&W • Duplex</div>
-        <button class="btn btn-primary" id="btnPreviewPrintNow">🖨️ Print Now (Enter)</button>
+        <button class="btn btn-secondary btn-sm" id="btnAutoDetectPrinterCaps">
+          🔍 Auto-Detect from Windows Driver
+        </button>
+        <button class="btn btn-secondary btn-sm" id="btnCancelPrinterConfig">Cancel</button>
+        <button class="btn btn-primary btn-sm" id="btnSavePrinterConfig">💾 Save Printer Profile</button>
       </div>
     </div>
   </div>

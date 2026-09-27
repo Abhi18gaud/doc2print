@@ -101,20 +101,36 @@ export async function POST(request: NextRequest) {
     else if (rawType.includes('jpeg') || rawType.includes('jpg') || ext === 'jpg' || ext === 'jpeg') normFileType = 'jpg';
     else normFileType = 'pdf';
 
-    // Normalize paper_size to 'A4' | 'A3' | 'passport' | 'custom'
-    let normPaperSize = 'A4';
-    const lowerPaper = rawPaperSize.toLowerCase();
-    if (lowerPaper === 'a3') normPaperSize = 'A3';
-    else if (lowerPaper === 'passport') normPaperSize = 'passport';
-    else if (lowerPaper === 'custom' || lowerPaper === 'legal') normPaperSize = 'custom';
-    else normPaperSize = 'A4';
+    const mode = (formData.get('mode') as 'document' | 'photo') || 'document';
+    const paperType = (formData.get('paper_type') as string) || 'plain';
+    const quality = (formData.get('quality') as string) || 'normal';
+    const photoSize = (formData.get('photo_size') as string) || '';
+    const photoPaper = (formData.get('photo_paper') as string) || 'glossy';
+    const photoQuality = (formData.get('photo_quality') as string) || 'standard';
+    const selectedPagesStr = (formData.get('selected_pages') as string) || '';
 
-    // Requirement 3: Price must be server-authoritative
+    let selectedPages: number[] = [];
+    if (selectedPagesStr) {
+      try {
+        selectedPages = JSON.parse(selectedPagesStr);
+      } catch (e) {
+        selectedPages = selectedPagesStr.split(',').map((s) => parseInt(s.trim(), 10)).filter((n) => !isNaN(n));
+      }
+    }
+    const effectivePages = selectedPages.length > 0 ? selectedPages.length : pages;
+
+    // Requirement 3: Price must be strictly server-authoritative
     const serverCalc = calculatePrintPrice({
-      pages,
+      mode,
+      pages: effectivePages,
       copies,
       colorMode: colorMode === 'color' ? 'color' : 'bw',
-      paperSize: normPaperSize,
+      paperSize: rawPaperSize,
+      paperType,
+      quality,
+      photoSize,
+      photoPaper,
+      photoQuality,
       duplex,
       binding,
       stapling,
@@ -123,9 +139,14 @@ export async function POST(request: NextRequest) {
     // Never trust client price; always enforce server-calculated authoritative price
     const finalPrice = serverCalc.total;
 
-    let finalPaperSize = normPaperSize;
-    if (binding) finalPaperSize = `${normPaperSize} + Spiral Binding`;
-    else if (stapling) finalPaperSize = `${normPaperSize} + Corner Stapling`;
+    let finalPaperSize = rawPaperSize.toUpperCase();
+    if (mode === 'photo') {
+      finalPaperSize = `Photo ${photoSize || '4x6'} (${photoPaper || 'Glossy'})`;
+    } else {
+      finalPaperSize = `${rawPaperSize.toUpperCase()} (${paperType})`;
+      if (binding) finalPaperSize += ' + Spiral Binding';
+      else if (stapling) finalPaperSize += ' + Corner Stapling';
+    }
 
     // 1. Upload file to Supabase Storage bucket 'print-files'
     const timestamp = Date.now();
@@ -171,12 +192,49 @@ export async function POST(request: NextRequest) {
 
     const printerId = printers?.[0]?.id || null;
 
-    // 3. Insert job record into Supabase
+    // Requirement 25-28: Scoped Daily Token Numbering starting from 01, resetting per shop business day
+    const shopTimezone = targetShop.timezone || targetShop.price_config?.timezone || 'Asia/Kolkata';
+    let startOfDayIso = '';
+    try {
+      const now = new Date();
+      const formatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: shopTimezone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      });
+      const [yearStr, monthStr, dayStr] = formatter.format(now).split('-');
+      const year = parseInt(yearStr, 10);
+      const month = parseInt(monthStr, 10) - 1;
+      const day = parseInt(dayStr, 10);
+
+      const d = new Date(Date.UTC(year, month, day, 0, 0, 0));
+      const utcDate = new Date(d.toLocaleString('en-US', { timeZone: 'UTC' }));
+      const tzDate = new Date(d.toLocaleString('en-US', { timeZone: shopTimezone }));
+      const offsetMs = tzDate.getTime() - utcDate.getTime();
+      startOfDayIso = new Date(d.getTime() - offsetMs).toISOString();
+    } catch {
+      const now = new Date();
+      now.setUTCHours(0, 0, 0, 0);
+      startOfDayIso = now.toISOString();
+    }
+
+    // Count today's existing jobs for this shop to generate the sequential daily token
+    const { count: todayJobsCount } = await client
+      .from('jobs')
+      .select('id', { count: 'exact', head: true })
+      .eq('shop_id', shopId)
+      .gte('created_at', startOfDayIso);
+
+    const dailyTokenNumber = (todayJobsCount || 0) + 1;
+
+    // 3. Insert job record into Supabase (Permanent unique UUID id + scoped daily_token)
     const { data: job, error: insertError } = await client
       .from('jobs')
       .insert({
         shop_id: shopId,
         printer_id: printerId,
+        token_number: dailyTokenNumber,
         file_url: fileUrl,
         file_name: file.name,
         file_type: normFileType,

@@ -15,11 +15,49 @@ export interface PriceConfig {
   rateColorDouble?: number;
   rateSpiralBinding?: number;
   rateStapling?: number;
-  paperSizes: {
+  paperSizes?: {
     [key: string]: {
       name: string;
       extra: number;
+      enabled?: boolean;
       description?: string;
+    };
+  };
+  paperTypes?: {
+    [key: string]: {
+      name: string;
+      extra: number;
+      enabled?: boolean;
+      description?: string;
+    };
+  };
+  qualities?: {
+    [key: string]: {
+      name: string;
+      extra: number;
+      enabled?: boolean;
+    };
+  };
+  photoSizes?: {
+    [key: string]: {
+      name: string;
+      price: number;
+      enabled?: boolean;
+      aspectRatio?: string;
+    };
+  };
+  photoPapers?: {
+    [key: string]: {
+      name: string;
+      extra: number;
+      enabled?: boolean;
+    };
+  };
+  photoQualities?: {
+    [key: string]: {
+      name: string;
+      extra: number;
+      enabled?: boolean;
     };
   };
   payment_methods?: {
@@ -87,6 +125,10 @@ export interface Job {
   pages: number;
   copies: number;
   paper_size: string;
+  paper_type?: string | null;
+  quality?: string | null;
+  photo_size?: string | null;
+  selected_pages?: number[] | null;
   color_mode: 'bw' | 'color';
   duplex: boolean;
   orientation: 'portrait' | 'landscape' | 'auto';
@@ -94,6 +136,9 @@ export interface Job {
   payment_mode: PaymentMode;
   payment_status: PaymentStatus;
   print_status: PrintStatus;
+  cloud_media_status?: 'cloud_stored' | 'deleted' | null;
+  local_media_status?: 'pending_download' | 'local_available' | 'media_deleted' | null;
+  print_config?: Record<string, unknown> | null;
   failure_reason?: string | null;
   created_at: string;
   queued_at?: string | null;

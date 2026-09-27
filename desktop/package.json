@@ -6,9 +6,14 @@
   "scripts": {
     "start": "electron .",
     "build:win": "set CSC_IDENTITY_AUTO_DISCOVERY=false && electron-builder --win --publish=never",
+    "build:win:publish": "set CSC_IDENTITY_AUTO_DISCOVERY=false && electron-builder --win --publish=always",
     "build:mac": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --publish=never",
     "build:linux": "electron-builder --linux --publish=never",
-    "build:all": "electron-builder --win --mac --linux --publish=never"
+    "build:all": "electron-builder --win --mac --linux --publish=never",
+    "release:patch": "npm version patch && npm run build:win",
+    "release:minor": "npm version minor && npm run build:win",
+    "release:major": "npm version major && npm run build:win",
+    "release:beta": "npm version prerelease --preid=beta && npm run build:win"
   },
   "keywords": [
     "quickprint",
@@ -22,6 +27,7 @@
   "license": "Commercial",
   "dependencies": {
     "@supabase/supabase-js": "^2.49.1",
+    "electron-updater": "^6.8.9",
     "pdf-lib": "^1.17.1",
     "pdf-to-printer": "^5.8.1",
     "qrcode": "^1.5.4",
@@ -36,6 +42,14 @@
     "productName": "QuickPrint Counter OS",
     "copyright": "Copyright © 2026 QuickPrint Technologies",
     "forceCodeSigning": false,
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Abhi18gaud",
+        "repo": "doc2print",
+        "private": false
+      }
+    ],
     "directories": {
       "output": "dist"
     },

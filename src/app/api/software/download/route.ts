@@ -2,24 +2,38 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const fileName = searchParams.get('file') || 'QuickPrint-Counter-OS-Setup.exe';
 
   // Check if built installer exists in desktop/dist
   const distPath = path.join(process.cwd(), 'desktop', 'dist');
-  const primaryExe = path.join(distPath, 'QuickPrint-Counter-OS-Setup.exe');
-  const versionedExe = path.join(distPath, 'QuickPrint Counter OS Setup 2.4.0.exe');
+  let targetPath: string | null = null;
 
-  const targetPath = fs.existsSync(/*turbopackIgnore: true*/ primaryExe)
-    ? primaryExe
-    : fs.existsSync(/*turbopackIgnore: true*/ versionedExe)
-    ? versionedExe
-    : null;
+  if (fs.existsSync(distPath)) {
+    try {
+      const files = fs.readdirSync(distPath);
+      // Prefer exact match or latest generated setup .exe
+      const matching = files.filter((f) => f.endsWith('.exe') && !f.includes('.blockmap'));
+      const directMatch = matching.find((f) => f.toLowerCase() === fileName.toLowerCase());
+      const setupMatch = matching.find((f) => f.includes('Setup') || f.includes('QuickPrint'));
 
-  if (targetPath) {
-    const stat = fs.statSync(/*turbopackIgnore: true*/ targetPath);
-    const fileStream = fs.createReadStream(/*turbopackIgnore: true*/ targetPath);
+      if (directMatch) {
+        targetPath = path.join(distPath, directMatch);
+      } else if (setupMatch) {
+        targetPath = path.join(distPath, setupMatch);
+      }
+    } catch (e) {
+      console.warn('[DOWNLOAD_ROUTE] Could not read dist directory:', e);
+    }
+  }
+
+  // If found locally on the current machine, stream directly
+  if (targetPath && fs.existsSync(targetPath)) {
+    const stat = fs.statSync(targetPath);
+    const fileStream = fs.createReadStream(targetPath);
     return new NextResponse(fileStream as any, {
       headers: {
         'Content-Type': 'application/octet-stream',
@@ -29,13 +43,7 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  // Fallback: If not yet built on this machine, provide informative response or zip
-  return NextResponse.json(
-    {
-      status: 'pending_build',
-      message: 'QuickPrint installer executable is generating. Please run "npm run build:win" inside the desktop directory to generate the Windows Setup.exe binary.',
-      downloadHelp: 'You can launch the desktop app immediately by running "start-quickprint-desktop.bat" in the desktop folder.',
-    },
-    { status: 200 }
-  );
+  // Authoritative fallback: Redirect to GitHub Releases latest download
+  const githubReleaseUrl = `https://github.com/Abhi18gaud/doc2print/releases/latest/download/${fileName}`;
+  return NextResponse.redirect(githubReleaseUrl, { status: 302 });
 }

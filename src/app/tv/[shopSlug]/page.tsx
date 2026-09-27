@@ -104,6 +104,11 @@ export default function ShopTvQueueDisplay() {
     .filter((j) => j.print_status === 'completed')
     .slice(0, 8);
 
+  const formatToken = (num: number | string) => {
+    const n = Number(num);
+    return isNaN(n) ? String(num) : (n < 100 ? String(n).padStart(2, '0') : String(n));
+  };
+
   return (
     <div className="min-h-screen bg-[#141311] text-white p-6 md:p-10 flex flex-col justify-between select-none">
       {/* Top Header Bar */}
@@ -175,7 +180,7 @@ export default function ShopTvQueueDisplay() {
                       PRINTING NOW
                     </span>
                     <span className="text-[52px] font-mono font-bold text-white leading-none my-1">
-                      #{job.token_number}
+                      #{formatToken(job.token_number)}
                     </span>
                     <span className="text-[12px] font-mono text-[#a8a6a1]">
                       {job.pages}p • {job.paper_size.toUpperCase()}
@@ -210,7 +215,7 @@ export default function ShopTvQueueDisplay() {
                       POS {idx + 1}
                     </span>
                     <span className="text-[28px] font-mono font-bold text-white leading-tight">
-                      #{job.token_number}
+                      #{formatToken(job.token_number)}
                     </span>
                     <span className="text-[11px] font-mono text-[#ff5a1f]">
                       {job.pages}p
@@ -247,7 +252,7 @@ export default function ShopTvQueueDisplay() {
                     COLLECT NOW
                   </span>
                   <span className="text-[36px] font-mono font-bold text-white leading-tight my-1">
-                    #{job.token_number}
+                    #{formatToken(job.token_number)}
                   </span>
                   <span className="text-[11px] font-mono text-[#a8a6a1] truncate max-w-[130px]">
                     {job.file_name || 'Document.pdf'}

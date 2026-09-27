@@ -118,6 +118,28 @@
   const cfgPlanBadge = document.getElementById('cfgPlanBadge');
   const btnSaveSettings = document.getElementById('btnSaveSettings');
 
+  // View: Settings -> Software Updates (Requirements 7, 8, 9, 22)
+  const lblInstalledVersion = document.getElementById('lblInstalledVersion');
+  const btnCheckForUpdates = document.getElementById('btnCheckForUpdates');
+  const cfgAutoCheckUpdates = document.getElementById('cfgAutoCheckUpdates');
+  const cfgUpdateChannel = document.getElementById('cfgUpdateChannel');
+  const updateStatusBadge = document.getElementById('updateStatusBadge');
+  const updateActionPanel = document.getElementById('updateActionPanel');
+  const updatePanelTitle = document.getElementById('updatePanelTitle');
+  const updatePanelSubtitle = document.getElementById('updatePanelSubtitle');
+  const btnUpdateDownload = document.getElementById('btnUpdateDownload');
+  const btnUpdateInstall = document.getElementById('btnUpdateInstall');
+  const updateProgressBarContainer = document.getElementById('updateProgressBarContainer');
+  const updateProgressBarFill = document.getElementById('updateProgressBarFill');
+  const updateProgressLabel = document.getElementById('updateProgressLabel');
+  const updateProgressSpeed = document.getElementById('updateProgressSpeed');
+  const updatePrintNotice = document.getElementById('updatePrintNotice');
+  const updateToastBanner = document.getElementById('updateToastBanner');
+  const toastCurVer = document.getElementById('toastCurVer');
+  const toastNewVer = document.getElementById('toastNewVer');
+  const btnToastUpdateNow = document.getElementById('btnToastUpdateNow');
+  const btnToastDismiss = document.getElementById('btnToastDismiss');
+
   let currentAppUrl = 'https://doc2print.vercel.app';
 
   function getCleanDomain(url) {
@@ -128,24 +150,64 @@
     }
   }
 
-  // Modals
+  // Modals & Standee QR
   const qrModal = document.getElementById('qrModal');
   const btnCloseQrModal = document.getElementById('btnCloseQrModal');
   const btnCopyKioskUrl = document.getElementById('btnCopyKioskUrl');
   const btnPrintStandee = document.getElementById('btnPrintStandee');
+  const btnDownloadQrSvg = document.getElementById('btnDownloadQrSvg');
+  const btnDownloadQrPng = document.getElementById('btnDownloadQrPng');
   const qrUrlBadge = document.getElementById('qrUrlBadge');
+  const standeeShopNameDisplay = document.getElementById('standeeShopNameDisplay');
 
+  // Advanced Preview Modal
   const previewModal = document.getElementById('previewModal');
   const btnClosePreviewModal = document.getElementById('btnClosePreviewModal');
   const previewTitle = document.getElementById('previewTitle');
+  const previewModeTag = document.getElementById('previewModeTag');
+  const previewOrientationPill = document.getElementById('previewOrientationPill');
   const previewIframe = document.getElementById('previewIframe');
+  const imagePreviewContainer = document.getElementById('imagePreviewContainer');
+  const paperSheet = document.getElementById('paperSheet');
+  const previewImg = document.getElementById('previewImg');
+  const paperWatermarkText = document.getElementById('paperWatermarkText');
+  const previewDeletedNotice = document.getElementById('previewDeletedNotice');
+  const previewFileName = document.getElementById('previewFileName');
   const previewSpecs = document.getElementById('previewSpecs');
+  const btnPreviewDownload = document.getElementById('btnPreviewDownload');
   const btnPreviewPrintNow = document.getElementById('btnPreviewPrintNow');
 
-  const toastContainer = document.getElementById('toastContainer');
-  const orderChime = document.getElementById('orderChime');
+  // Printer Config Modal
+  const printerConfigModal = document.getElementById('printerConfigModal');
+  const btnClosePrinterConfigModal = document.getElementById('btnClosePrinterConfigModal');
+  const cfgModalPrinterTitle = document.getElementById('cfgModalPrinterTitle');
+  const cfgModalPrinterSub = document.getElementById('cfgModalPrinterSub');
+  const cfgPrinterCustomName = document.getElementById('cfgPrinterCustomName');
+  const cfgPrinterType = document.getElementById('cfgPrinterType');
+  const cfgPrinterPriority = document.getElementById('cfgPrinterPriority');
+  const cfgPrinterRoutingEnabled = document.getElementById('cfgPrinterRoutingEnabled');
+  const btnAutoDetectPrinterCaps = document.getElementById('btnAutoDetectPrinterCaps');
+  const btnCancelPrinterConfig = document.getElementById('btnCancelPrinterConfig');
+  const btnSavePrinterConfig = document.getElementById('btnSavePrinterConfig');
+
+  // Settings: Multi-Printer Management
+  const cfgMultiPrinterMode = document.getElementById('cfgMultiPrinterMode');
+  const cfgPrinterAssignmentMode = document.getElementById('cfgPrinterAssignmentMode');
+  const cfgLoadBalancing = document.getElementById('cfgLoadBalancing');
+  const multiPrinterSubSettings = document.getElementById('multiPrinterSubSettings');
+  const multiPrinterModeBadge = document.getElementById('multiPrinterModeBadge');
+  const multiPrinterQueueSummary = document.getElementById('multiPrinterQueueSummary');
+  const multiPrinterSummaryPills = document.getElementById('multiPrinterSummaryPills');
+  const btnManagePrintersShortcut = document.getElementById('btnManagePrintersShortcut');
 
   let activePreviewJob = null;
+  let activeEditingPrinterName = null;
+  let multiPrinterConfig = {
+    multiPrinterMode: false,
+    printerAssignmentMode: 'auto',
+    loadBalancing: true,
+    printersConfig: {},
+  };
 
   // --- HELPER: TOAST NOTIFICATIONS ---
   function showToast(message, type = 'info') {
@@ -345,21 +407,65 @@
         }
       }
 
-      // Pricing values (support both price_config schema and flat rates)
+      // Pricing values (Full Authoritative Catalog Sync)
       const pricing = currentShop.price_config || currentShop.settings || {};
       const rates = pricing.rates || {};
-      rateBwSingle.value = rates.bw_single || rates.bw || pricing.rateBwSingle || 2;
-      rateBwDouble.value = rates.bw_double || pricing.rateBwDouble || (rates.bw ? rates.bw * 1.5 : 3);
-      rateColorSingle.value = rates.color_single || rates.color || pricing.rateColorSingle || 10;
-      rateColorDouble.value = rates.color_double || pricing.rateColorDouble || (rates.color ? rates.color * 1.8 : 18);
-      rateSpiralBinding.value = pricing.rateSpiralBinding || 30;
-      rateStapling.value = pricing.rateStapling || 2;
+      if (rateBwSingle) rateBwSingle.value = rates.bw_single ?? rates.bw ?? pricing.rateBwSingle ?? 2;
+      if (rateBwDouble) rateBwDouble.value = rates.bw_double ?? pricing.rateBwDouble ?? (rates.bw ? rates.bw * 1.5 : 3);
+      if (rateColorSingle) rateColorSingle.value = rates.color_single ?? rates.color ?? pricing.rateColorSingle ?? 10;
+      if (rateColorDouble) rateColorDouble.value = rates.color_double ?? pricing.rateColorDouble ?? (rates.color ? rates.color * 1.8 : 18);
+      if (rateSpiralBinding) rateSpiralBinding.value = pricing.rateSpiralBinding ?? 30;
+      if (rateStapling) rateStapling.value = pricing.rateStapling ?? 2;
 
-      // Paper sizes extra fees
+      // Document paper sizes
       const paperSizes = pricing.paperSizes || {};
-      if (ratePaperA3) ratePaperA3.value = paperSizes.a3?.extra != null ? paperSizes.a3.extra : 4.0;
-      if (ratePaperLegal) ratePaperLegal.value = paperSizes.custom?.extra != null ? paperSizes.custom.extra : 2.0;
-      if (ratePaperPassport) ratePaperPassport.value = paperSizes.passport?.extra != null ? paperSizes.passport.extra : 35.0;
+      const elA3 = document.getElementById('ratePaperA3');
+      const elLegal = document.getElementById('ratePaperLegal');
+      const elA5 = document.getElementById('ratePaperA5');
+      if (elA3) elA3.value = paperSizes.a3?.extra ?? 4.0;
+      if (elLegal) elLegal.value = paperSizes.legal?.extra ?? paperSizes.custom?.extra ?? 2.0;
+      if (elA5) elA5.value = paperSizes.a5?.extra ?? 0.0;
+
+      // Document paper types
+      const paperTypes = pricing.paperTypes || {};
+      const elBond = document.getElementById('rateTypeBond');
+      const elGlossy = document.getElementById('rateTypeGlossy');
+      const elMatte = document.getElementById('rateTypeMatte');
+      if (elBond) elBond.value = paperTypes.bond?.extra ?? 2.0;
+      if (elGlossy) elGlossy.value = paperTypes.glossy?.extra ?? 10.0;
+      if (elMatte) elMatte.value = paperTypes.matte?.extra ?? 8.0;
+
+      // Document qualities
+      const qualities = pricing.qualities || {};
+      const elQHigh = document.getElementById('rateQualityHigh');
+      const elQPhoto = document.getElementById('rateQualityPhotoGrade');
+      if (elQHigh) elQHigh.value = qualities.high?.extra ?? 2.0;
+      if (elQPhoto) elQPhoto.value = qualities.photo_grade?.extra ?? 8.0;
+
+      // Photo printing rates
+      const photoSizes = pricing.photoSizes || {};
+      const elP4x6 = document.getElementById('ratePhoto4x6');
+      const elP5x7 = document.getElementById('ratePhoto5x7');
+      const elP6x8 = document.getElementById('ratePhoto6x8');
+      const elPPassport = document.getElementById('ratePhotoPassport');
+      const elPA4 = document.getElementById('ratePhotoA4');
+      if (elP4x6) elP4x6.value = photoSizes['4x6']?.price ?? 15.0;
+      if (elP5x7) elP5x7.value = photoSizes['5x7']?.price ?? 25.0;
+      if (elP6x8) elP6x8.value = photoSizes['6x8']?.price ?? 35.0;
+      if (elPPassport) elPPassport.value = photoSizes.passport?.price ?? 35.0;
+      if (elPA4) elPA4.value = photoSizes.a4_photo?.price ?? 50.0;
+
+      const photoPapers = pricing.photoPapers || {};
+      const elPPMatte = document.getElementById('ratePhotoPaperMatte');
+      const elPPPremium = document.getElementById('ratePhotoPaperPremium');
+      if (elPPMatte) elPPMatte.value = photoPapers.matte?.extra ?? 5.0;
+      if (elPPPremium) elPPPremium.value = photoPapers.premium?.extra ?? 10.0;
+
+      const photoQualities = pricing.photoQualities || {};
+      const elPQHigh = document.getElementById('ratePhotoQualityHigh');
+      const elPQStudio = document.getElementById('ratePhotoQualityStudio');
+      if (elPQHigh) elPQHigh.value = photoQualities.high?.extra ?? 5.0;
+      if (elPQStudio) elPQStudio.value = photoQualities.photo_grade?.extra ?? 10.0;
 
       // Payment methods configuration
       const payMethods = pricing.payment_methods || { enable_upi: true, enable_cash: true };
@@ -392,11 +498,30 @@
           if (localCfg.autoLaunch !== undefined && cfgAutoLaunch) {
             cfgAutoLaunch.checked = Boolean(localCfg.autoLaunch);
           }
+          if (localCfg.autoCheckUpdates !== undefined && cfgAutoCheckUpdates) {
+            cfgAutoCheckUpdates.checked = localCfg.autoCheckUpdates !== false;
+          }
+          if (localCfg.updateChannel && cfgUpdateChannel) {
+            cfgUpdateChannel.value = localCfg.updateChannel;
+          }
         }
       } catch (e) {}
 
+      // Authoritative Single Source of Truth Version (Requirement 1, 12, 22)
+      const installedVer = window.quickprintApi?.version || '2.4.0';
+      if (lblInstalledVersion) lblInstalledVersion.textContent = installedVer;
+      if (toastCurVer) toastCurVer.textContent = installedVer;
+
+      // Query initial update state
+      if (window.quickprintApi?.getUpdateStatus) {
+        window.quickprintApi.getUpdateStatus().then((st) => applyUpdateStatusUI(st)).catch(() => {});
+      }
+
       btnAutoPrintState.classList.toggle('active', autoPrintEnabled);
       btnAutoPrintState.textContent = autoPrintEnabled ? 'ON' : 'OFF';
+
+      // Load multi-printer configuration and routing profiles
+      await loadMultiPrinterSettings();
 
       // Scan printers and load initial jobs
       await scanPrinters();
@@ -407,7 +532,77 @@
     }
   }
 
-  // --- PRINTER ENUMERATION ---
+  // --- MULTI-PRINTER ENGINE HELPERS ---
+  async function loadMultiPrinterSettings() {
+    try {
+      if (window.quickprintApi?.getMultiPrinterConfig) {
+        const cfg = await window.quickprintApi.getMultiPrinterConfig();
+        if (cfg) {
+          multiPrinterConfig = {
+            multiPrinterMode: Boolean(cfg.multiPrinterMode),
+            printerAssignmentMode: cfg.printerAssignmentMode || 'auto',
+            loadBalancing: cfg.loadBalancing !== false,
+            printersConfig: cfg.printersConfig || {},
+          };
+          applyMultiPrinterUIState();
+        }
+      }
+    } catch (e) {
+      console.warn('Could not load multi-printer config:', e);
+    }
+  }
+
+  function applyMultiPrinterUIState() {
+    const isMulti = Boolean(multiPrinterConfig.multiPrinterMode);
+    if (cfgMultiPrinterMode) cfgMultiPrinterMode.checked = isMulti;
+    if (cfgPrinterAssignmentMode) cfgPrinterAssignmentMode.value = multiPrinterConfig.printerAssignmentMode || 'auto';
+    if (cfgLoadBalancing) cfgLoadBalancing.checked = multiPrinterConfig.loadBalancing !== false;
+
+    if (multiPrinterSubSettings) {
+      multiPrinterSubSettings.style.display = isMulti ? 'flex' : 'none';
+    }
+    if (multiPrinterModeBadge) {
+      multiPrinterModeBadge.textContent = isMulti ? 'ADVANCED MULTI-PRINTER MODE' : 'SINGLE PRINTER MODE';
+      multiPrinterModeBadge.className = `badge-chip ${isMulti ? 'badge-primary-subtle' : 'grey'}`;
+    }
+    if (multiPrinterQueueSummary) {
+      multiPrinterQueueSummary.style.display = isMulti ? 'flex' : 'none';
+    }
+  }
+
+  function checkPrinterCompatibility(job, printerProfile) {
+    if (!printerProfile) return { compatible: true };
+    if (printerProfile.enabled === false) {
+      return { compatible: false, reason: 'Routing disabled in shop config' };
+    }
+    const caps = printerProfile.capabilities || {};
+    const jobColor = (job.color_mode || 'bw').toLowerCase();
+    if (jobColor === 'color' && !caps.color) {
+      return { compatible: false, reason: 'Requires Color (Printer is Monochrome)' };
+    }
+    if (job.duplex && !caps.duplex) {
+      return { compatible: false, reason: 'Requires Duplex (Not supported)' };
+    }
+    const rawPaper = (job.paper_size || 'A4').toUpperCase();
+    if (rawPaper.includes('A3') && !caps.a3) {
+      return { compatible: false, reason: 'Requires A3 Paper' };
+    }
+    if (rawPaper.includes('4X6') && !caps.photo_4x6) {
+      return { compatible: false, reason: 'Requires 4×6 Photo Paper' };
+    }
+    if (rawPaper.includes('5X7') && !caps.photo_5x7) {
+      return { compatible: false, reason: 'Requires 5×7 Photo Paper' };
+    }
+    if (rawPaper.includes('LEGAL') && !caps.legal) {
+      return { compatible: false, reason: 'Requires Legal Paper' };
+    }
+    if ((job.mode === 'photo' || rawPaper.includes('PHOTO')) && printerProfile.type === 'bw') {
+      return { compatible: false, reason: 'B&W printer cannot print photo lab jobs' };
+    }
+    return { compatible: true };
+  }
+
+  // --- PRINTER ENUMERATION & MANAGEMENT ---
   async function scanPrinters() {
     try {
       const res = await window.quickprintApi.getPrinters();
@@ -428,6 +623,37 @@
 
       availablePrinters.forEach((name) => {
         const isDef = name === defaultPrinterName;
+        const profile = multiPrinterConfig.printersConfig?.[name] || {
+          name,
+          customName: name,
+          type: 'document',
+          priority: isDef ? 1 : 2,
+          enabled: true,
+          capabilities: {
+            a4: true,
+            a3: false,
+            a5: true,
+            legal: true,
+            color: true,
+            bw: true,
+            duplex: false,
+            photo_4x6: false,
+            photo_5x7: false,
+            borderless: false,
+          },
+        };
+
+        const caps = profile.capabilities || {};
+        const displayName = profile.customName || name;
+        const typeLabels = {
+          document: 'General Document',
+          bw: 'B&W Laser',
+          color: 'Color Document',
+          photo: 'Photo Lab Printer',
+          large_format: 'Large Format Plotter',
+          specialized: 'Specialized Printer',
+        };
+        const typeLabel = typeLabels[profile.type] || 'Standard';
 
         // Card
         const card = document.createElement('div');
@@ -435,21 +661,46 @@
         card.innerHTML = `
           <div class="printer-card-header">
             <div class="printer-title-box">
-              <div class="printer-avatar">🖨️</div>
+              <div class="printer-avatar ${isDef ? 'active-avatar' : ''}">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect width="12" height="8" x="6" y="14"/></svg>
+              </div>
               <div>
-                <h3 class="printer-name-h3" title="${name}">${name}</h3>
-                <span class="printer-status-sub">${isDef ? '★ Default Windows Spooler' : 'Ready'}</span>
+                <h3 class="printer-name-h3" title="${displayName}">${displayName}</h3>
+                <span class="printer-status-sub ${isDef ? 'active' : ''}">
+                  <span class="${isDef ? 'pulse-dot-sm' : 'idle-dot-sm'}"></span>
+                  ${isDef ? 'Primary Default' : 'Ready'} • ${typeLabel}
+                </span>
               </div>
             </div>
-            ${isDef ? '<span class="badge-chip color">DEFAULT</span>' : ''}
+            <div style="display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
+              ${isDef ? '<span class="badge-chip badge-primary-subtle">DEFAULT</span>' : ''}
+              ${multiPrinterConfig.multiPrinterMode ? `<span class="badge-chip grey" style="font-size:10px;">Priority ${profile.priority || 2}</span>` : ''}
+            </div>
           </div>
+
+          <!-- Driver & Shop Capabilities Row -->
+          <div class="printer-caps-row">
+            <span class="printer-cap-chip ${caps.a4 ? 'supported' : 'unsupported'}">A4 ${caps.a4 ? '✓' : '✗'}</span>
+            <span class="printer-cap-chip ${caps.a3 ? 'supported' : 'unsupported'}">A3 ${caps.a3 ? '✓' : '✗'}</span>
+            <span class="printer-cap-chip ${caps.bw ? 'supported' : 'unsupported'}">B&W ${caps.bw ? '✓' : '✗'}</span>
+            <span class="printer-cap-chip ${caps.color ? 'supported' : 'unsupported'}">Color ${caps.color ? '✓' : '✗'}</span>
+            <span class="printer-cap-chip ${caps.duplex ? 'supported' : 'unsupported'}">Duplex ${caps.duplex ? '✓' : '✗'}</span>
+            <span class="printer-cap-chip ${caps.photo_4x6 ? 'supported' : 'unsupported'}">Photo 4×6 ${caps.photo_4x6 ? '✓' : '✗'}</span>
+          </div>
+
           <div class="printer-card-actions">
             ${
               !isDef
-                ? `<button class="btn btn-secondary btn-sm btn-set-default" data-name="${name}">Set As Default</button>`
-                : '<button class="btn btn-primary btn-sm" disabled>Active Default</button>'
+                ? `<button class="btn btn-secondary btn-sm btn-set-default" data-name="${name}">Set Default</button>`
+                : '<button class="btn btn-primary btn-sm btn-active-default" disabled><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Default</button>'
             }
-            <button class="btn btn-secondary btn-sm btn-card-test" data-name="${name}">Test Ticket</button>
+            <button class="btn btn-secondary btn-sm btn-card-test" data-name="${name}">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect width="12" height="8" x="6" y="14"/></svg>
+              Test
+            </button>
+            <button class="btn btn-secondary btn-sm btn-card-manage" data-name="${name}" title="Configure capabilities, priority and routing rules">
+              ⚙️ Manage
+            </button>
           </div>
         `;
         printersGrid.appendChild(card);
@@ -457,7 +708,7 @@
         // Select option
         const opt = document.createElement('option');
         opt.value = name;
-        opt.textContent = name + (isDef ? ' (Default)' : '');
+        opt.textContent = displayName + (isDef ? ' (Default)' : '');
         if (isDef) opt.selected = true;
         testPrinterSelect.appendChild(opt);
       });
@@ -480,9 +731,161 @@
           await triggerTestPrint(name);
         });
       });
+
+      // Bind Manage Configuration buttons on cards
+      document.querySelectorAll('.btn-card-manage').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          const name = e.target.getAttribute('data-name');
+          openPrinterConfigModal(name);
+        });
+      });
     } catch (err) {
       console.warn('Scan printers error:', err);
     }
+  }
+
+  // --- PRINTER CONFIGURATION MODAL ---
+  function openPrinterConfigModal(printerName) {
+    activeEditingPrinterName = printerName;
+    const isDef = printerName === defaultPrinterName;
+    const profile = multiPrinterConfig.printersConfig?.[printerName] || {
+      name: printerName,
+      customName: printerName,
+      type: 'document',
+      priority: isDef ? 1 : 2,
+      enabled: true,
+      capabilities: { a4: true, a3: false, a5: true, legal: true, color: true, bw: true, duplex: false, photo_4x6: false, photo_5x7: false, borderless: false },
+    };
+    const caps = profile.capabilities || {};
+
+    cfgModalPrinterTitle.textContent = `Configure: ${profile.customName || printerName}`;
+    cfgModalPrinterSub.textContent = `Windows Hardware Spooler: ${printerName}`;
+    cfgPrinterCustomName.value = profile.customName || printerName;
+    cfgPrinterType.value = profile.type || 'document';
+    cfgPrinterPriority.value = String(profile.priority || (isDef ? 1 : 2));
+    cfgPrinterRoutingEnabled.checked = profile.enabled !== false;
+
+    const setCb = (id, val) => {
+      const el = document.getElementById(id);
+      if (el) el.checked = Boolean(val);
+    };
+
+    setCb('cap_a4', caps.a4 !== false);
+    setCb('cap_a3', caps.a3);
+    setCb('cap_a5', caps.a5 !== false);
+    setCb('cap_legal', caps.legal !== false);
+    setCb('cap_color', caps.color !== false);
+    setCb('cap_bw', caps.bw !== false);
+    setCb('cap_duplex', caps.duplex);
+    setCb('cap_photo_4x6', caps.photo_4x6);
+    setCb('cap_photo_5x7', caps.photo_5x7);
+    setCb('cap_borderless', caps.borderless);
+
+    printerConfigModal.classList.add('active');
+  }
+
+  if (btnClosePrinterConfigModal) {
+    btnClosePrinterConfigModal.addEventListener('click', () => {
+      printerConfigModal.classList.remove('active');
+      activeEditingPrinterName = null;
+    });
+  }
+
+  if (btnCancelPrinterConfig) {
+    btnCancelPrinterConfig.addEventListener('click', () => {
+      printerConfigModal.classList.remove('active');
+      activeEditingPrinterName = null;
+    });
+  }
+
+  if (btnSavePrinterConfig) {
+    btnSavePrinterConfig.addEventListener('click', async () => {
+      if (!activeEditingPrinterName) return;
+      const customName = cfgPrinterCustomName.value.trim() || activeEditingPrinterName;
+      const type = cfgPrinterType.value;
+      const priority = parseInt(cfgPrinterPriority.value, 10) || 2;
+      const enabled = cfgPrinterRoutingEnabled.checked;
+
+      const getCb = (id) => {
+        const el = document.getElementById(id);
+        return el ? el.checked : false;
+      };
+
+      const capabilities = {
+        a4: getCb('cap_a4'),
+        a3: getCb('cap_a3'),
+        a5: getCb('cap_a5'),
+        legal: getCb('cap_legal'),
+        color: getCb('cap_color'),
+        bw: getCb('cap_bw'),
+        duplex: getCb('cap_duplex'),
+        photo_4x6: getCb('cap_photo_4x6'),
+        photo_5x7: getCb('cap_photo_5x7'),
+        borderless: getCb('cap_borderless'),
+      };
+
+      if (!multiPrinterConfig.printersConfig) multiPrinterConfig.printersConfig = {};
+      multiPrinterConfig.printersConfig[activeEditingPrinterName] = {
+        name: activeEditingPrinterName,
+        customName,
+        type,
+        priority,
+        enabled,
+        capabilities,
+      };
+
+      btnSavePrinterConfig.disabled = true;
+      btnSavePrinterConfig.textContent = 'Saving...';
+      try {
+        await window.quickprintApi.saveMultiPrinterConfig(multiPrinterConfig);
+        showToast(`Printer profile for "${customName}" saved!`, 'success');
+        printerConfigModal.classList.remove('active');
+        activeEditingPrinterName = null;
+        await scanPrinters();
+        renderQueue();
+      } catch (e) {
+        showToast('Failed to save printer profile: ' + e.message, 'danger');
+      } finally {
+        btnSavePrinterConfig.disabled = false;
+        btnSavePrinterConfig.textContent = '💾 Save Printer Profile';
+      }
+    });
+  }
+
+  if (btnAutoDetectPrinterCaps) {
+    btnAutoDetectPrinterCaps.addEventListener('click', async () => {
+      if (!activeEditingPrinterName) return;
+      btnAutoDetectPrinterCaps.disabled = true;
+      btnAutoDetectPrinterCaps.textContent = 'Detecting Hardware Driver...';
+      try {
+        const caps = await window.quickprintApi.detectPrinterCapabilities(activeEditingPrinterName);
+        if (caps) {
+          const setCb = (id, val) => {
+            const el = document.getElementById(id);
+            if (el) el.checked = Boolean(val);
+          };
+          setCb('cap_color', caps.color);
+          setCb('cap_bw', caps.bw);
+          setCb('cap_duplex', caps.duplex);
+          setCb('cap_a4', caps.a4);
+          setCb('cap_a3', caps.a3);
+          setCb('cap_a5', caps.a5);
+          setCb('cap_legal', caps.legal);
+          setCb('cap_photo_4x6', caps.photo_4x6);
+          setCb('cap_photo_5x7', caps.photo_5x7);
+          setCb('cap_borderless', caps.borderless);
+          if (caps.detectedType && cfgPrinterType) {
+            cfgPrinterType.value = caps.detectedType;
+          }
+          showToast('Hardware capabilities auto-detected from Windows driver!', 'success');
+        }
+      } catch (e) {
+        showToast('Detection error: ' + e.message, 'warning');
+      } finally {
+        btnAutoDetectPrinterCaps.disabled = false;
+        btnAutoDetectPrinterCaps.textContent = '🔍 Auto-Detect from Windows Driver';
+      }
+    });
   }
 
   // --- TEST PRINT ---
@@ -514,9 +917,17 @@
   // Normalize DB job record to Counter OS UI contract
   function normalizeJob(raw) {
     if (!raw) return raw;
-    const tokenDisplay = raw.token_number
-      ? `#${String(raw.token_number).padStart(3, '0')}`
-      : `#${(raw.id || '').substring(0, 4).toUpperCase()}`;
+    let tokenDisplay = '';
+    if (raw.token_number != null) {
+      const num = Number(raw.token_number);
+      if (!isNaN(num)) {
+        tokenDisplay = `#${num < 100 ? String(num).padStart(2, '0') : String(num)}`;
+      } else {
+        tokenDisplay = `#${String(raw.token_number)}`;
+      }
+    } else {
+      tokenDisplay = `#${(raw.id || '').substring(0, 4).toUpperCase()}`;
+    }
 
     const printStatus = raw.print_status || raw.status || 'queued';
     let uiStatus = 'pending';
@@ -656,6 +1067,42 @@
     emptyQueueState.style.display = 'none';
     queueCardsList.innerHTML = '';
 
+    // Update Multi-Printer Summary Bar if enabled (Requirement 39 & 40)
+    if (multiPrinterConfig.multiPrinterMode && multiPrinterSummaryPills) {
+      let readyCount = 0;
+      let offlineCount = 0;
+      let printerPillsHtml = '';
+
+      availablePrinters.forEach((pName) => {
+        const pHealth = (window._lastPrinterHealthMap && window._lastPrinterHealthMap[pName]) || { isOnline: true, status: 'READY' };
+        const isOnline = pHealth.isOnline && pHealth.status === 'READY';
+        if (isOnline) readyCount++;
+        else offlineCount++;
+
+        const pProfile = multiPrinterConfig.printersConfig?.[pName];
+        const pLabel = pProfile?.customName || pName;
+
+        const qJobs = activeJobs.filter(
+          (j) => (j.status === 'pending' || j.status === 'printing') &&
+                 (j.assigned_printer === pName || (!j.assigned_printer && pName === defaultPrinterName))
+        );
+
+        printerPillsHtml += `
+          <span class="printer-queue-pill ${isOnline ? 'ready' : 'offline'}" title="${isOnline ? 'Printer Ready' : 'Printer Offline'}">
+            <span class="printer-dot-live"></span>
+            <span>${pLabel}: <strong>${qJobs.length}</strong></span>
+          </span>
+        `;
+      });
+
+      multiPrinterSummaryPills.innerHTML = `
+        <span class="badge-chip grey" style="font-weight:700;">${availablePrinters.length} Total</span>
+        <span class="badge-chip green" style="font-weight:700;">● ${readyCount} Ready</span>
+        ${offlineCount > 0 ? `<span class="badge-chip red" style="font-weight:700;">● ${offlineCount} Offline</span>` : ''}
+        ${printerPillsHtml}
+      `;
+    }
+
     filtered.forEach((job) => {
       const isPaid = job.payment_status === 'paid';
       const isPrinting = job.status === 'printing';
@@ -684,6 +1131,41 @@
         for (let p = 1; p <= pages; p++) {
           jobPagesStatus[job.id][p] = isCompleted ? 'completed' : 'pending';
         }
+      }
+
+      // Multi-Printer assigned selector row (Requirement 15, 16, 19, 42)
+      let multiPrinterRowHtml = '';
+      if (multiPrinterConfig.multiPrinterMode) {
+        const assignedPName = job.assigned_printer || defaultPrinterName || availablePrinters[0] || '';
+        let optionsHtml = '';
+
+        availablePrinters.forEach((pName) => {
+          const prof = multiPrinterConfig.printersConfig?.[pName] || { name: pName, customName: pName };
+          const pComp = checkPrinterCompatibility(job, prof);
+          const compSuffix = pComp.compatible ? '' : ` ⚠️ (${pComp.reason})`;
+          const isSelected = pName === assignedPName;
+          optionsHtml += `<option value="${pName}" ${isSelected ? 'selected' : ''}>${prof.customName || pName}${compSuffix}</option>`;
+        });
+
+        const currentProfile = multiPrinterConfig.printersConfig?.[assignedPName] || { name: assignedPName };
+        const compCheck = checkPrinterCompatibility(job, currentProfile);
+
+        multiPrinterRowHtml = `
+          <div class="order-assigned-printer-row">
+            <span class="order-assigned-label">Assigned Printer:</span>
+            <select class="order-assigned-select" data-id="${job.id}">
+              ${optionsHtml}
+            </select>
+            <span class="order-assigned-badge ${job.assignment_type === 'manual' ? 'manual' : 'auto'}">
+              ${job.assignment_type === 'manual' ? 'Manual Assignment' : 'Auto Assigned'}
+            </span>
+            ${
+              !compCheck.compatible
+                ? `<span class="badge-chip red" style="font-size:11px;" title="${compCheck.reason}">⚠️ ${compCheck.reason}</span>`
+                : ''
+            }
+          </div>
+        `;
       }
 
       // Generate page cells HTML
@@ -753,7 +1235,12 @@
               ${
                 isCompleted
                   ? `<span class="badge-chip green" style="padding: 6px 12px; font-weight: 700; border-radius: 6px;">✓ PRINT COMPLETED</span>
-                     <button class="btn btn-secondary btn-sm btn-print-job" data-id="${job.id}" title="Send duplicate to printer">🔄 Reprint All</button>`
+                     <button class="btn btn-secondary btn-sm btn-print-job" data-id="${job.id}" title="Send duplicate to printer">🔄 Reprint All</button>
+                     ${
+                       job.local_media_status === 'deleted'
+                         ? '<span class="badge-chip grey" style="font-size:11px; padding:6px 10px;">Media Deleted</span>'
+                         : `<button class="btn btn-secondary btn-sm btn-delete-job-media" data-id="${job.id}" title="Delete local customer file to free disk space">🗑️ Delete Media</button>`
+                     }`
                   : isPrinting
                   ? `<button class="btn btn-primary btn-sm" disabled style="opacity: 0.85;">⏳ Printing to Spooler...</button>`
                   : job.status === 'failed'
@@ -769,6 +1256,8 @@
             </div>
           </div>
         </div>
+
+        ${multiPrinterRowHtml}
 
         <div class="order-card-footer">
           <button class="btn-toggle-pages" data-id="${job.id}">
@@ -805,6 +1294,27 @@
       `;
 
       queueCardsList.appendChild(card);
+    });
+
+    // Bind assigned printer select dropdowns (Requirement 15 & 42)
+    document.querySelectorAll('.order-assigned-select').forEach((sel) => {
+      sel.addEventListener('change', (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        const selectedPrinter = e.currentTarget.value;
+        const job = activeJobs.find((j) => j.id === id);
+        if (job) {
+          job.assigned_printer = selectedPrinter;
+          job.assignment_type = 'manual';
+          const prof = multiPrinterConfig.printersConfig?.[selectedPrinter];
+          const comp = checkPrinterCompatibility(job, prof);
+          if (!comp.compatible) {
+            showToast(`Warning: "${prof?.customName || selectedPrinter}" may not support this order (${comp.reason})`, 'warning');
+          } else {
+            showToast(`Token ${job.token_number} reassigned to ${prof?.customName || selectedPrinter}`, 'info');
+          }
+          renderQueue();
+        }
+      });
     });
 
     // Toggle pages breakdown drawer
@@ -905,9 +1415,31 @@
         if (job) openPreview(job);
       });
     });
+
+    // Bind action buttons: Delete Media (Owner Privacy & Storage Management)
+    document.querySelectorAll('.btn-delete-job-media').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        const job = activeJobs.find((j) => j.id === id);
+        if (!job) return;
+        if (!confirm(`Delete local customer media for Token ${job.token_number}?\n\nThis permanently clears the local document/photo to free disk space. All order, token, and payment history will be preserved.`)) return;
+
+        try {
+          if (window.quickprintApi?.deleteLocalMedia) {
+            await window.quickprintApi.deleteLocalMedia(id);
+            job.local_media_status = 'deleted';
+            showToast(`Local media file deleted for Token ${job.token_number}. Records preserved.`, 'info');
+            renderQueue();
+            if (typeof refreshMediaStorageStats === 'function') refreshMediaStorageStats();
+          }
+        } catch (err) {
+          showToast('Failed to delete media: ' + err.message, 'danger');
+        }
+      });
+    });
   }
 
-  // Execute Real Print via physical spooler pipeline (with page-level support)
+  // Execute Real Print via physical spooler pipeline (with page-level & multi-printer support)
   async function executePrint(job, printOptions = {}) {
     const card = document.getElementById(`job-card-${job.id}`);
     if (card) card.classList.add('printing');
@@ -938,13 +1470,17 @@
     renderQueue();
     renderHistoryTable();
 
-    const targetPrinter = defaultPrinterName || 'Default Printer';
+    // Select target printer based on mode (Requirement 14, 15, 24)
+    const targetPrinter = (multiPrinterConfig.multiPrinterMode && job.assigned_printer)
+      ? job.assigned_printer
+      : (defaultPrinterName || 'Default Printer');
+
     const rangeLabel = printOptions.pageRange ? ` (Pages ${printOptions.pageRange})` : '';
     showToast(`Sending Token ${job.token_number || ''}${rangeLabel} to ${targetPrinter}...`, 'info');
 
     try {
       const res = await window.quickprintApi.printJob(job.id, {
-        printerName: defaultPrinterName,
+        printerName: targetPrinter,
         fileUrl: job.file_url,
         copies: job.copies || 1,
         duplex: job.duplex,
@@ -995,70 +1531,200 @@
     }
   }
 
-  // --- PDF PREVIEW ---
-  function openPreview(job) {
+  // --- ADVANCED DOCUMENT & AUTO-FIT IMAGE PREVIEW (Requirements 1, 2, 3, 4, 5, 6, 7, 34, 35) ---
+  async function openPreview(job) {
     activePreviewJob = job;
     const tokenDisplay = job.token_number || `#${job.id.substring(0, 4).toUpperCase()}`;
-    previewTitle.textContent = `Document Preview — Token ${tokenDisplay} (${job.customer_name || 'Customer'})`;
-    previewSpecs.textContent = `${job.page_count || 1} Pages • ${job.copies || 1} Copies • ${job.color_mode || 'B&W'} • ${job.duplex ? 'Duplex' : 'Single'}`;
+    const custName = job.customer_name || 'Customer';
+    const isPhotoOrImage =
+      job.mode === 'photo' ||
+      /\.(jpe?g|png|webp|bmp|tiff|gif)$/i.test(job.file_name || '') ||
+      (job.paper_size && job.paper_size.includes('Photo'));
 
-    if (job.file_url) {
-      previewIframe.srcdoc = `
-        <body style="font-family:system-ui,-apple-system,sans-serif; display:flex; align-items:center; justify-content:center; height:100vh; margin:0; background:#f8fafc; color:#64748b;">
-          <div style="text-align:center;">
-            <p>⏳ Loading document preview...</p>
-          </div>
-        </body>
-      `;
-      // Verify document availability (retention policy / purge handling)
-      fetch(job.file_url, { method: 'HEAD' })
-        .then((resp) => {
-          if (resp.ok) {
+    if (previewTitle) {
+      previewTitle.textContent = `${isPhotoOrImage ? 'Image Preview' : 'Document Preview'} — Token ${tokenDisplay} (${custName})`;
+    }
+    if (previewFileName) {
+      previewFileName.textContent = job.file_name || (isPhotoOrImage ? 'photo.jpg' : 'document.pdf');
+    }
+
+    // Actual configuration specs
+    const copies = job.copies || 1;
+    const copiesText = `${copies} ${copies > 1 ? 'Copies' : 'Copy'}`;
+    const colorText = job.color_mode === 'color' ? 'Full Color' : 'B&W';
+    const duplexText = job.duplex ? 'Two-Sided (Duplex)' : 'Single-Sided';
+    const rawPaper = (job.paper_size || (isPhotoOrImage ? '4×6' : 'A4')).split(' + ')[0];
+
+    // Determine final paper orientation (Requirement 7)
+    let isLandscape = false;
+    if (job.orientation) {
+      isLandscape = job.orientation.toLowerCase() === 'landscape';
+    } else if (job.paper_size && job.paper_size.toLowerCase().includes('landscape')) {
+      isLandscape = true;
+    }
+    const orientationLabel = isLandscape ? 'Landscape' : 'Portrait';
+
+    if (previewSpecs) {
+      previewSpecs.textContent = `${rawPaper} • ${colorText} • ${duplexText} • ${copiesText} • ${orientationLabel}`;
+    }
+
+    if (previewModeTag) {
+      previewModeTag.textContent = isPhotoOrImage ? (job.mode === 'photo' ? 'PHOTO LAB PRINT' : 'IMAGE PRINT') : 'PDF DOCUMENT';
+    }
+
+    if (previewOrientationPill) {
+      previewOrientationPill.textContent = `${orientationLabel} Paper Preview`;
+    }
+
+    // Handle deleted/purged media gracefully (Requirements 5 & 35)
+    if (job.local_media_status === 'deleted') {
+      previewIframe.style.display = 'none';
+      imagePreviewContainer.style.display = 'none';
+      previewDeletedNotice.style.display = 'flex';
+      previewModal.classList.add('active');
+      return;
+    }
+
+    if (isPhotoOrImage) {
+      // Auto-fit Image Preview: Fit complete image inside container with zero internal scrolling (Requirements 1, 2, 3)
+      previewIframe.style.display = 'none';
+      previewDeletedNotice.style.display = 'none';
+      imagePreviewContainer.style.display = 'flex';
+      previewImg.style.display = 'none';
+
+      paperSheet.className = isLandscape
+        ? 'preview-paper-sheet orientation-landscape'
+        : 'preview-paper-sheet orientation-portrait';
+
+      if (paperWatermarkText) {
+        paperWatermarkText.textContent = `${rawPaper} • ${colorText} • Token ${tokenDisplay}`;
+      }
+
+      // Try local media file first for instant zero-latency preview
+      let resolvedSrc = null;
+      try {
+        if (window.quickprintApi?.getLocalMediaUrl) {
+          const localUrl = await window.quickprintApi.getLocalMediaUrl(job.id);
+          if (localUrl) resolvedSrc = localUrl;
+        }
+      } catch (e) {}
+
+      if (!resolvedSrc && job.file_url) {
+        resolvedSrc = job.file_url;
+      }
+
+      if (resolvedSrc) {
+        previewImg.onload = () => {
+          previewImg.style.display = 'block';
+          // If orientation was not hardcoded in order, adapt sheet to true aspect ratio
+          if (!job.orientation && !job.paper_size?.toLowerCase().includes('landscape')) {
+            if (previewImg.naturalWidth > previewImg.naturalHeight * 1.12) {
+              paperSheet.className = 'preview-paper-sheet orientation-landscape';
+              if (previewOrientationPill) previewOrientationPill.textContent = 'Landscape Fit';
+            } else {
+              paperSheet.className = 'preview-paper-sheet orientation-portrait';
+              if (previewOrientationPill) previewOrientationPill.textContent = 'Portrait Fit';
+            }
+          }
+        };
+        previewImg.onerror = () => {
+          previewImg.style.display = 'none';
+          previewDeletedNotice.style.display = 'flex';
+        };
+        previewImg.src = resolvedSrc;
+      } else {
+        previewImg.style.display = 'none';
+        previewDeletedNotice.style.display = 'flex';
+      }
+    } else {
+      // Keep PDF / Document preview feature (Requirement 4)
+      imagePreviewContainer.style.display = 'none';
+      previewDeletedNotice.style.display = 'none';
+      previewIframe.style.display = 'block';
+
+      if (job.file_url) {
+        previewIframe.srcdoc = `
+          <body style="font-family:system-ui,-apple-system,sans-serif; display:flex; align-items:center; justify-content:center; height:100vh; margin:0; background:#f8fafc; color:#64748b;">
+            <div style="text-align:center;">
+              <p>⏳ Loading document preview...</p>
+            </div>
+          </body>
+        `;
+        fetch(job.file_url, { method: 'HEAD' })
+          .then((resp) => {
+            if (resp.ok) {
+              previewIframe.removeAttribute('srcdoc');
+              previewIframe.src = job.file_url;
+            } else {
+              previewIframe.srcdoc = `
+                <body style="font-family:system-ui,-apple-system,sans-serif; display:flex; align-items:center; justify-content:center; height:100vh; margin:0; background:#f8fafc;">
+                  <div style="text-align:center; padding: 24px; max-width: 400px; border-radius: 12px; background: white; box-shadow: 0 4px 16px rgba(0,0,0,0.06);">
+                    <div style="font-size: 40px; margin-bottom: 12px;">🔒</div>
+                    <h3 style="margin: 0 0 8px; color: #0f172a; font-weight: 700;">Media file is no longer available</h3>
+                    <p style="font-size: 13px; color: #64748b; line-height: 1.5; margin: 0;">This customer document was purged in accordance with data retention policies.</p>
+                  </div>
+                </body>
+              `;
+            }
+          })
+          .catch(() => {
             previewIframe.removeAttribute('srcdoc');
             previewIframe.src = job.file_url;
-          } else {
-            previewIframe.srcdoc = `
-              <body style="font-family:system-ui,-apple-system,sans-serif; display:flex; align-items:center; justify-content:center; height:100vh; margin:0; background:#f8fafc;">
-                <div style="text-align:center; padding: 24px; max-width: 400px; border-radius: 12px; background: white; box-shadow: 0 4px 16px rgba(0,0,0,0.06);">
-                  <div style="font-size: 40px; margin-bottom: 12px;">🔒</div>
-                  <h3 style="margin: 0 0 8px; color: #0f172a; font-weight: 700;">Document no longer available</h3>
-                  <p style="font-size: 13px; color: #64748b; line-height: 1.5; margin: 0;">This customer document was securely purged in accordance with data privacy and retention policies.</p>
-                </div>
-              </body>
-            `;
-          }
-        })
-        .catch(() => {
-          previewIframe.removeAttribute('srcdoc');
-          previewIframe.src = job.file_url;
-        });
-    } else {
-      previewIframe.srcdoc = `
-        <body style="font-family:system-ui,-apple-system,sans-serif; display:flex; align-items:center; justify-content:center; height:100vh; margin:0; background:#f8fafc;">
-          <div style="text-align:center; padding: 24px; max-width: 400px; border-radius: 12px; background: white; box-shadow: 0 4px 16px rgba(0,0,0,0.06);">
-            <div style="font-size: 40px; margin-bottom: 12px;">📄</div>
-            <h3 style="margin: 0 0 8px; color: #0f172a; font-weight: 700;">Document Pending Upload</h3>
-            <p style="font-size: 13px; color: #64748b; line-height: 1.5; margin: 0;">Token: ${tokenDisplay} | File: ${job.file_name || 'document.pdf'}</p>
-          </div>
-        </body>
-      `;
+          });
+      } else {
+        previewIframe.srcdoc = `
+          <body style="font-family:system-ui,-apple-system,sans-serif; display:flex; align-items:center; justify-content:center; height:100vh; margin:0; background:#f8fafc;">
+            <div style="text-align:center; padding: 24px; max-width: 400px; border-radius: 12px; background: white; box-shadow: 0 4px 16px rgba(0,0,0,0.06);">
+              <div style="font-size: 40px; margin-bottom: 12px;">📄</div>
+              <h3 style="margin: 0 0 8px; color: #0f172a; font-weight: 700;">Document Pending Upload</h3>
+              <p style="font-size: 13px; color: #64748b; line-height: 1.5; margin: 0;">Token: ${tokenDisplay} | File: ${job.file_name || 'document.pdf'}</p>
+            </div>
+          </body>
+        `;
+      }
     }
 
     previewModal.classList.add('active');
   }
 
+  // Close preview modal
   btnClosePreviewModal.addEventListener('click', () => {
     previewModal.classList.remove('active');
     previewIframe.src = 'about:blank';
+    if (previewImg) previewImg.src = '';
   });
 
+  // Print now from preview modal (Works for both Image & PDF - Requirement 5)
   btnPreviewPrintNow.addEventListener('click', () => {
     if (activePreviewJob) {
       previewModal.classList.remove('active');
       previewIframe.src = 'about:blank';
+      if (previewImg) previewImg.src = '';
       executePrint(activePreviewJob);
     }
   });
+
+  // Download original customer media from preview modal (Works for both Image & PDF - Requirements 5 & 35)
+  if (btnPreviewDownload) {
+    btnPreviewDownload.addEventListener('click', async () => {
+      if (!activePreviewJob) return;
+      showToast('Preparing download for customer media...', 'info');
+      try {
+        if (window.quickprintApi?.downloadMedia) {
+          const res = await window.quickprintApi.downloadMedia(activePreviewJob.id, activePreviewJob.file_name);
+          if (res && res.success) {
+            showToast(`Saved to computer: ${res.savedPath || ''}`, 'success');
+          } else {
+            showToast(res?.error || 'Media file is no longer available.', 'warning');
+          }
+        } else {
+          showToast('Download API not available in this build.', 'warning');
+        }
+      } catch (e) {
+        showToast('Download error: ' + e.message, 'danger');
+      }
+    });
+  }
 
   // --- HISTORY VIEW ---
   function renderHistoryTable() {
@@ -1192,6 +1858,29 @@
 
   // --- PRICING CATALOG SAVE ---
   btnSavePricing.addEventListener('click', async () => {
+    const elA3 = document.getElementById('ratePaperA3');
+    const elLegal = document.getElementById('ratePaperLegal');
+    const elA5 = document.getElementById('ratePaperA5');
+
+    const elBond = document.getElementById('rateTypeBond');
+    const elGlossy = document.getElementById('rateTypeGlossy');
+    const elMatte = document.getElementById('rateTypeMatte');
+
+    const elQHigh = document.getElementById('rateQualityHigh');
+    const elQPhoto = document.getElementById('rateQualityPhotoGrade');
+
+    const elP4x6 = document.getElementById('ratePhoto4x6');
+    const elP5x7 = document.getElementById('ratePhoto5x7');
+    const elP6x8 = document.getElementById('ratePhoto6x8');
+    const elPPassport = document.getElementById('ratePhotoPassport');
+    const elPA4 = document.getElementById('ratePhotoA4');
+
+    const elPPMatte = document.getElementById('ratePhotoPaperMatte');
+    const elPPPremium = document.getElementById('ratePhotoPaperPremium');
+
+    const elPQHigh = document.getElementById('ratePhotoQualityHigh');
+    const elPQStudio = document.getElementById('ratePhotoQualityStudio');
+
     const pricing = {
       rateBwSingle: parseFloat(rateBwSingle.value) || 2.0,
       rateBwDouble: parseFloat(rateBwDouble.value) || 3.0,
@@ -1200,10 +1889,42 @@
       rateSpiralBinding: parseFloat(rateSpiralBinding.value) || 30.0,
       rateStapling: parseFloat(rateStapling.value) || 2.0,
       paperSizes: {
-        a4: { name: 'A4', extra: 0.0, description: 'Standard 75 GSM' },
-        a3: { name: 'A3', extra: parseFloat(ratePaperA3 ? ratePaperA3.value : '4') || 0.0, description: 'Large Sheet' },
-        custom: { name: 'Legal/Bond', extra: parseFloat(ratePaperLegal ? ratePaperLegal.value : '2') || 0.0, description: 'Legal / Bond' },
-        passport: { name: 'Passport (8×)', extra: parseFloat(ratePaperPassport ? ratePaperPassport.value : '35') || 0.0, description: 'Glossy Sheet' },
+        a4: { name: 'A4', extra: 0.0, enabled: true },
+        a3: { name: 'A3', extra: parseFloat(elA3?.value || '4') || 0.0, enabled: true },
+        a5: { name: 'A5', extra: parseFloat(elA5?.value || '0') || 0.0, enabled: true },
+        legal: { name: 'Legal', extra: parseFloat(elLegal?.value || '2') || 0.0, enabled: true },
+        letter: { name: 'Letter', extra: 0.0, enabled: true },
+        custom: { name: 'Custom / Legal', extra: parseFloat(elLegal?.value || '2') || 0.0, enabled: true },
+        passport: { name: 'Passport (8×)', extra: parseFloat(elPPassport?.value || '35') || 0.0, enabled: true },
+      },
+      paperTypes: {
+        plain: { name: 'Plain Paper', extra: 0.0, enabled: true },
+        bond: { name: 'Bond Paper', extra: parseFloat(elBond?.value || '2') || 0.0, enabled: true },
+        glossy: { name: 'Glossy Paper', extra: parseFloat(elGlossy?.value || '10') || 0.0, enabled: true },
+        photo_paper: { name: 'Photo Paper', extra: parseFloat(elGlossy?.value || '12') || 0.0, enabled: true },
+        matte: { name: 'Matte Photo Paper', extra: parseFloat(elMatte?.value || '8') || 0.0, enabled: true },
+      },
+      qualities: {
+        normal: { name: 'Normal', extra: 0.0, enabled: true },
+        high: { name: 'High', extra: parseFloat(elQHigh?.value || '2') || 0.0, enabled: true },
+        photo_grade: { name: 'Photo Grade', extra: parseFloat(elQPhoto?.value || '8') || 0.0, enabled: true },
+      },
+      photoSizes: {
+        '4x6': { name: '4 × 6 inch', price: parseFloat(elP4x6?.value || '15') || 15.0, enabled: true },
+        '5x7': { name: '5 × 7 inch', price: parseFloat(elP5x7?.value || '25') || 25.0, enabled: true },
+        '6x8': { name: '6 × 8 inch', price: parseFloat(elP6x8?.value || '35') || 35.0, enabled: true },
+        passport: { name: 'Passport Photo', price: parseFloat(elPPassport?.value || '35') || 35.0, enabled: true },
+        a4_photo: { name: 'A4 Photo', price: parseFloat(elPA4?.value || '50') || 50.0, enabled: true },
+      },
+      photoPapers: {
+        glossy: { name: 'Glossy', extra: 0.0, enabled: true },
+        matte: { name: 'Matte', extra: parseFloat(elPPMatte?.value || '5') || 0.0, enabled: true },
+        premium: { name: 'Premium Photo Paper', extra: parseFloat(elPPPremium?.value || '10') || 0.0, enabled: true },
+      },
+      photoQualities: {
+        standard: { name: 'Standard', extra: 0.0, enabled: true },
+        high: { name: 'High', extra: parseFloat(elPQHigh?.value || '5') || 0.0, enabled: true },
+        photo_grade: { name: 'Photo Grade', extra: parseFloat(elPQStudio?.value || '10') || 0.0, enabled: true },
       },
     };
 
@@ -1231,6 +1952,14 @@
       return;
     }
 
+    const multiOn = cfgMultiPrinterMode ? cfgMultiPrinterMode.checked : false;
+    const assignmentMode = cfgPrinterAssignmentMode ? cfgPrinterAssignmentMode.value : 'auto';
+    const loadBalancingOn = cfgLoadBalancing ? cfgLoadBalancing.checked : true;
+
+    multiPrinterConfig.multiPrinterMode = multiOn;
+    multiPrinterConfig.printerAssignmentMode = assignmentMode;
+    multiPrinterConfig.loadBalancing = loadBalancingOn;
+
     const settings = {
       autoLaunch: cfgAutoLaunch ? cfgAutoLaunch.checked : false,
       soundAlert: cfgSoundAlert ? cfgSoundAlert.checked : true,
@@ -1241,6 +1970,12 @@
         enable_upi: upiOn,
         enable_cash: cashOn,
       },
+      multiPrinterMode: multiOn,
+      printerAssignmentMode: assignmentMode,
+      loadBalancing: loadBalancingOn,
+      printersConfig: multiPrinterConfig.printersConfig || {},
+      autoCheckUpdates: cfgAutoCheckUpdates ? cfgAutoCheckUpdates.checked : true,
+      updateChannel: cfgUpdateChannel ? cfgUpdateChannel.value : 'stable',
     };
 
     autoPrintEnabled = settings.autoPrintDefault;
@@ -1249,13 +1984,255 @@
 
     try {
       await window.quickprintApi.saveSettings(settings);
-      showToast('Preferences & Payment Methods saved to cloud!', 'success');
+      showToast('Preferences & Multi-Printer configuration saved!', 'success');
       shopNameDisplay.textContent = settings.shopName || currentShop.name;
+      applyMultiPrinterUIState();
       await renderShopQrAndUrls();
+      await scanPrinters();
+      renderQueue();
     } catch (e) {
       showToast('Failed to save preferences.', 'danger');
     }
   });
+
+  // --- PRODUCTION AUTO-UPDATER & RELEASE PIPELINE (Requirements 6, 7, 8, 9, 16, 17, 18, 22) ---
+  function formatUpdateSpeed(bytesPerSec) {
+    if (!bytesPerSec || bytesPerSec < 1024) return `${bytesPerSec || 0} B/s`;
+    if (bytesPerSec < 1024 * 1024) return `${(bytesPerSec / 1024).toFixed(1)} KB/s`;
+    return `${(bytesPerSec / (1024 * 1024)).toFixed(1)} MB/s`;
+  }
+
+  function applyUpdateStatusUI(status) {
+    if (!status) return;
+
+    const installedVer = status.currentVersion || window.quickprintApi?.version || '2.4.0';
+    if (lblInstalledVersion) lblInstalledVersion.textContent = installedVer;
+    if (toastCurVer) toastCurVer.textContent = installedVer;
+
+    switch (status.state) {
+      case 'checking':
+        if (updateStatusBadge) {
+          updateStatusBadge.textContent = 'CHECKING...';
+          updateStatusBadge.className = 'badge-chip grey';
+        }
+        break;
+
+      case 'available':
+        if (updateStatusBadge) {
+          updateStatusBadge.textContent = 'UPDATE AVAILABLE';
+          updateStatusBadge.className = 'badge-chip color';
+        }
+        if (updateActionPanel) updateActionPanel.style.display = 'block';
+        if (updatePanelTitle) {
+          updatePanelTitle.textContent = `QuickPrint Counter OS v${status.availableVersion} Available`;
+        }
+        if (updatePanelSubtitle) {
+          updatePanelSubtitle.textContent = status.releaseNotes || 'Production update with stability enhancements and fixes.';
+        }
+        if (btnUpdateDownload) {
+          btnUpdateDownload.style.display = 'inline-block';
+          btnUpdateDownload.disabled = false;
+          btnUpdateDownload.textContent = `Download v${status.availableVersion}`;
+        }
+        if (btnUpdateInstall) btnUpdateInstall.style.display = 'none';
+        if (updateProgressBarContainer) updateProgressBarContainer.style.display = 'none';
+        if (updatePrintNotice) updatePrintNotice.style.display = 'none';
+
+        // Show unobtrusive notification banner (Requirement 7)
+        if (updateToastBanner) {
+          if (toastNewVer) toastNewVer.textContent = status.availableVersion || 'Latest';
+          updateToastBanner.style.display = 'flex';
+        }
+        break;
+
+      case 'downloading':
+        if (updateStatusBadge) {
+          updateStatusBadge.textContent = 'DOWNLOADING...';
+          updateStatusBadge.className = 'badge-chip color';
+        }
+        if (updateActionPanel) updateActionPanel.style.display = 'block';
+        if (btnUpdateDownload) {
+          btnUpdateDownload.style.display = 'inline-block';
+          btnUpdateDownload.disabled = true;
+          btnUpdateDownload.textContent = 'Downloading...';
+        }
+        if (btnUpdateInstall) btnUpdateInstall.style.display = 'none';
+        if (updateProgressBarContainer) updateProgressBarContainer.style.display = 'block';
+        if (updateProgressBarFill) updateProgressBarFill.style.width = `${status.progress || 0}%`;
+        if (updateProgressLabel) updateProgressLabel.textContent = `Downloading: ${status.progress || 0}%`;
+        if (updateProgressSpeed) updateProgressSpeed.textContent = formatUpdateSpeed(status.bytesPerSecond);
+        break;
+
+      case 'downloaded':
+        if (updateStatusBadge) {
+          updateStatusBadge.textContent = 'READY TO INSTALL';
+          updateStatusBadge.className = 'badge-chip color';
+        }
+        if (updateActionPanel) updateActionPanel.style.display = 'block';
+        if (updatePanelTitle) updatePanelTitle.textContent = `Version ${status.availableVersion || ''} Downloaded & Verified`;
+        if (updatePanelSubtitle) updatePanelSubtitle.textContent = 'Package verified. Click Restart & Install to apply update.';
+        if (btnUpdateDownload) btnUpdateDownload.style.display = 'none';
+        if (btnUpdateInstall) {
+          btnUpdateInstall.style.display = 'inline-block';
+          btnUpdateInstall.disabled = false;
+          btnUpdateInstall.textContent = '🔄 Restart & Install Now';
+        }
+        if (updateProgressBarContainer) updateProgressBarContainer.style.display = 'none';
+        if (updatePrintNotice) updatePrintNotice.style.display = 'none';
+        break;
+
+      case 'deferred':
+        // Requirement 9: Print job actively in progress
+        if (updateStatusBadge) {
+          updateStatusBadge.textContent = 'PRINTING: UPDATE HELD';
+          updateStatusBadge.className = 'badge-chip warning';
+        }
+        if (updateActionPanel) updateActionPanel.style.display = 'block';
+        if (updatePrintNotice) updatePrintNotice.style.display = 'block';
+        if (btnUpdateInstall) {
+          btnUpdateInstall.disabled = true;
+          btnUpdateInstall.textContent = 'Paused (Printing)';
+        }
+        break;
+
+      case 'not-available':
+        if (updateStatusBadge) {
+          updateStatusBadge.textContent = 'UP TO DATE';
+          updateStatusBadge.className = 'badge-chip color';
+        }
+        if (updateActionPanel) updateActionPanel.style.display = 'none';
+        if (updateToastBanner) updateToastBanner.style.display = 'none';
+        break;
+
+      case 'error':
+        if (updateStatusBadge) {
+          updateStatusBadge.textContent = 'CHECK FAILED';
+          updateStatusBadge.className = 'badge-chip grey';
+        }
+        if (btnUpdateDownload) {
+          btnUpdateDownload.disabled = false;
+          btnUpdateDownload.textContent = 'Retry Download';
+        }
+        break;
+
+      default:
+        break;
+    }
+  }
+
+  // Check For Updates Button
+  if (btnCheckForUpdates) {
+    btnCheckForUpdates.addEventListener('click', async () => {
+      btnCheckForUpdates.disabled = true;
+      btnCheckForUpdates.textContent = 'Checking...';
+      showToast('Checking GitHub Releases for QuickPrint updates...', 'info');
+
+      try {
+        if (window.quickprintApi?.checkForUpdates) {
+          const res = await window.quickprintApi.checkForUpdates();
+          if (res?.success) {
+            showToast('Update check initiated.', 'info');
+          } else {
+            showToast(res?.error || 'Unable to reach update server. Local printing is unaffected.', 'warning');
+          }
+        } else {
+          showToast('Updater unavailable in browser preview mode.', 'info');
+        }
+      } catch (err) {
+        showToast('Update check notice: ' + err.message, 'warning');
+      } finally {
+        setTimeout(() => {
+          btnCheckForUpdates.disabled = false;
+          btnCheckForUpdates.textContent = 'Check for Updates';
+        }, 3000);
+      }
+    });
+  }
+
+  // Download Update Button
+  if (btnUpdateDownload) {
+    btnUpdateDownload.addEventListener('click', async () => {
+      btnUpdateDownload.disabled = true;
+      btnUpdateDownload.textContent = 'Starting Download...';
+      showToast('Starting background update download...', 'info');
+      try {
+        if (window.quickprintApi?.startUpdateDownload) {
+          await window.quickprintApi.startUpdateDownload();
+        }
+      } catch (err) {
+        showToast('Download failed: ' + err.message, 'danger');
+        btnUpdateDownload.disabled = false;
+      }
+    });
+  }
+
+  // Restart & Install Update Button (Safe Print Guard: Requirement 9)
+  if (btnUpdateInstall) {
+    btnUpdateInstall.addEventListener('click', async () => {
+      showToast('Verifying active spooler queue safety...', 'info');
+      try {
+        if (window.quickprintApi?.installUpdateNow) {
+          const res = await window.quickprintApi.installUpdateNow();
+          if (res?.deferred) {
+            showToast(res.message || 'Print job actively printing. Update will install automatically after prints finish.', 'warning');
+            if (updatePrintNotice) updatePrintNotice.style.display = 'block';
+          }
+        }
+      } catch (err) {
+        showToast('Install error: ' + err.message, 'danger');
+      }
+    });
+  }
+
+  // Toast Banner Actions
+  if (btnToastUpdateNow) {
+    btnToastUpdateNow.addEventListener('click', () => {
+      if (updateToastBanner) updateToastBanner.style.display = 'none';
+      const settingsNav = document.querySelector('.nav-item[data-view="settings"]');
+      if (settingsNav) settingsNav.click();
+      const updatesGroup = document.getElementById('settingsGroupUpdates');
+      if (updatesGroup) updatesGroup.scrollIntoView({ behavior: 'smooth' });
+
+      // Automatically initiate download if not started
+      if (window.quickprintApi?.startUpdateDownload) {
+        window.quickprintApi.startUpdateDownload().catch(() => {});
+      }
+    });
+  }
+
+  if (btnToastDismiss) {
+    btnToastDismiss.addEventListener('click', () => {
+      if (updateToastBanner) updateToastBanner.style.display = 'none';
+    });
+  }
+
+  // Real-time update status listener
+  if (window.quickprintApi?.onUpdateStatusChanged) {
+    window.quickprintApi.onUpdateStatusChanged((statusData) => {
+      applyUpdateStatusUI(statusData);
+    });
+  }
+
+  // Settings multi-printer switch live listener
+  if (cfgMultiPrinterMode) {
+    cfgMultiPrinterMode.addEventListener('change', async () => {
+      multiPrinterConfig.multiPrinterMode = cfgMultiPrinterMode.checked;
+      applyMultiPrinterUIState();
+      try {
+        await window.quickprintApi.saveMultiPrinterConfig(multiPrinterConfig);
+        showToast(`Multi-Printer Mode is now ${multiPrinterConfig.multiPrinterMode ? 'ENABLED' : 'DISABLED'}`, 'info');
+      } catch (e) {}
+      await scanPrinters();
+      renderQueue();
+    });
+  }
+
+  if (btnManagePrintersShortcut) {
+    btnManagePrintersShortcut.addEventListener('click', () => {
+      const printerNav = document.querySelector('.nav-item[data-view="printers"]');
+      if (printerNav) printerNav.click();
+    });
+  }
 
   // --- RENDER QR CODE & MONITOR TV URLS ---
   async function renderShopQrAndUrls() {
@@ -1268,6 +2245,7 @@
 
     if (shopSlugDisplay) shopSlugDisplay.textContent = `${cleanDomain}/kiosk/${shopSlug}`;
     if (cfgDomainPrefix) cfgDomainPrefix.textContent = `${cleanDomain}/kiosk/`;
+    if (standeeShopNameDisplay) standeeShopNameDisplay.textContent = currentShop?.name || 'QuickPrint Counter';
 
     const kioskUrl = `${baseUrl}/kiosk/${shopSlug}`;
     if (qrUrlBadge) qrUrlBadge.textContent = kioskUrl;
@@ -1297,7 +2275,7 @@
     if (tvSmartTvUrl) tvSmartTvUrl.textContent = `${cleanDomain}/tv/${shopSlug}`;
   }
 
-  // --- MODAL: COUNTER QR ---
+  // --- MODAL: COUNTER QR & STANDEE (Requirements 29, 30, 31, 32, 33) ---
   btnShowCounterQR.addEventListener('click', async () => {
     await renderShopQrAndUrls();
     qrModal.classList.add('active');
@@ -1310,7 +2288,7 @@
   btnCopyKioskUrl.addEventListener('click', () => {
     const url = qrUrlBadge.textContent.trim();
     navigator.clipboard.writeText(url).then(() => {
-      showToast('Kiosk URL copied to clipboard!', 'success');
+      showToast('Customer Kiosk URL copied to clipboard!', 'success');
     });
   });
 
@@ -1323,6 +2301,56 @@
       showToast('Could not print standee.', 'danger');
     }
   });
+
+  // Download high-resolution PNG QR (Requirement 30 & 32)
+  if (btnDownloadQrPng) {
+    btnDownloadQrPng.addEventListener('click', () => {
+      const qrImg = document.getElementById('qrImageDisplay');
+      if (!qrImg || !qrImg.src) {
+        showToast('QR Code not ready yet.', 'warning');
+        return;
+      }
+      const shopSlug = currentShop?.slug || currentShop?.qr_code_slug || 'quickprint-shop';
+      const a = document.createElement('a');
+      a.href = qrImg.src;
+      a.download = `gaurprint-counter-qr-${shopSlug}.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      showToast('Counter QR (PNG) downloaded for print materials!', 'success');
+    });
+  }
+
+  // Download crisp vector SVG QR (Requirement 30 & 32)
+  if (btnDownloadQrSvg) {
+    btnDownloadQrSvg.addEventListener('click', async () => {
+      const baseUrl = (currentAppUrl || 'https://doc2print.vercel.app').replace(/\/+$/, '');
+      const shopSlug = currentShop?.slug || currentShop?.qr_code_slug || 'quickprint-shop';
+      const kioskUrl = `${baseUrl}/kiosk/${shopSlug}`;
+      showToast('Generating high-resolution vector SVG...', 'info');
+      try {
+        if (window.quickprintApi?.generateQrSvg) {
+          const res = await window.quickprintApi.generateQrSvg(kioskUrl);
+          if (res?.success && res.svg) {
+            const blob = new Blob([res.svg], { type: 'image/svg+xml;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `gaurprint-standee-qr-${shopSlug}.svg`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            showToast('Vector SVG QR downloaded for signage/printing!', 'success');
+            return;
+          }
+        }
+        showToast('Could not generate SVG QR.', 'warning');
+      } catch (err) {
+        showToast('SVG download error: ' + err.message, 'danger');
+      }
+    });
+  }
 
   // --- TV WAITING BOARD ACTIONS ---
   const btnOpenTvBoardTitle = document.getElementById('btnOpenTvBoardTitle');
@@ -1471,6 +2499,126 @@
     });
   }
 
+  // --- LIVE PRINTER HEALTH & PERSISTENT STATUS HANDLING ---
+  function updatePrinterHealthDisplay(health) {
+    if (!health) return;
+    const isOnline = health.isOnline && health.status === 'READY';
+    const alertBanner = document.getElementById('printerOfflineAlertBanner');
+    const bannerTitle = document.getElementById('offlineBannerTitle');
+    const bannerDesc = document.getElementById('offlineBannerDesc');
+    const diagName = document.getElementById('diagPrinterName');
+    const diagConn = document.getElementById('diagPrinterConn');
+    const diagQueue = document.getElementById('diagQueueCount');
+    const diagCheck = document.getElementById('diagLastCheck');
+    const diagBadge = document.getElementById('diagnosticHealthBadge');
+
+    const printerLabel = health.printer || defaultPrinterName || 'Windows Spooler';
+    if (diagName) diagName.textContent = printerLabel;
+    if (diagQueue) diagQueue.textContent = `${health.jobCount || 0} in queue`;
+    if (diagCheck) diagCheck.textContent = new Date().toLocaleTimeString();
+
+    if (!isOnline) {
+      if (alertBanner) {
+        alertBanner.style.display = 'flex';
+        if (bannerTitle) bannerTitle.textContent = `Printer Offline / Disconnected: "${printerLabel}"`;
+        if (bannerDesc) bannerDesc.textContent = `${health.details || 'Printer power is off or USB/Wi-Fi is disconnected.'} Reconnect printer to process jobs.`;
+      }
+      if (diagConn) {
+        diagConn.textContent = health.status || 'Offline';
+        diagConn.style.color = '#DC2626';
+      }
+      if (diagBadge) {
+        diagBadge.className = 'badge-chip red';
+        diagBadge.textContent = `● ${health.status || 'OFFLINE'}`;
+      }
+      if (kpiSpoolerState) {
+        kpiSpoolerState.textContent = health.status || 'OFFLINE';
+        kpiSpoolerState.style.color = '#DC2626';
+      }
+    } else {
+      if (alertBanner) alertBanner.style.display = 'none';
+      if (diagConn) {
+        diagConn.textContent = 'Online & Ready';
+        diagConn.style.color = '#059669';
+      }
+      if (diagBadge) {
+        diagBadge.className = 'badge-chip green';
+        diagBadge.textContent = '● ONLINE & READY';
+      }
+      if (kpiSpoolerState) {
+        kpiSpoolerState.textContent = 'READY';
+        kpiSpoolerState.style.color = '#059669';
+      }
+    }
+  }
+
+  if (window.quickprintApi?.onPrinterStatusUpdated) {
+    window.quickprintApi.onPrinterStatusUpdated((health) => {
+      updatePrinterHealthDisplay(health);
+    });
+  }
+
+  const btnRetryPrinter = document.getElementById('btnRetryPrinterConnection');
+  if (btnRetryPrinter) {
+    btnRetryPrinter.addEventListener('click', async () => {
+      showToast('Checking hardware printer connection...', 'info');
+      if (window.quickprintApi?.getPrinterHealth) {
+        try {
+          const health = await window.quickprintApi.getPrinterHealth(defaultPrinterName);
+          updatePrinterHealthDisplay(health);
+          if (health.isOnline && health.status === 'READY') {
+            showToast(`Printer "${defaultPrinterName}" is now ONLINE and READY!`, 'success');
+          } else {
+            showToast(`Printer still offline: ${health.details || 'Check cables and power'}`, 'warning');
+          }
+        } catch (e) {
+          showToast(`Health check error: ${e.message}`, 'danger');
+        }
+      }
+    });
+  }
+
+  // --- LOCAL CUSTOMER MEDIA STORAGE MANAGEMENT ---
+  async function refreshMediaStorageStats() {
+    try {
+      if (window.quickprintApi?.getMediaStorageStats) {
+        const stats = await window.quickprintApi.getMediaStorageStats();
+        const usedEl = document.getElementById('mediaStorageUsed');
+        const countEl = document.getElementById('mediaStorageCount');
+        if (usedEl) usedEl.textContent = stats.formattedSize || '0.00 MB';
+        if (countEl) countEl.textContent = `${stats.fileCount || 0} files cached locally`;
+      }
+    } catch (e) {}
+  }
+
+  const btnRefreshMediaStats = document.getElementById('btnRefreshMediaStats');
+  if (btnRefreshMediaStats) {
+    btnRefreshMediaStats.addEventListener('click', async () => {
+      await refreshMediaStorageStats();
+      showToast('Local media storage stats refreshed.', 'info');
+    });
+  }
+
+  const btnClearPrintedMedia = document.getElementById('btnClearPrintedMedia');
+  if (btnClearPrintedMedia) {
+    btnClearPrintedMedia.addEventListener('click', async () => {
+      if (!confirm('Are you sure you want to permanently clear local customer files for completed jobs?\n\nThis frees up computer disk space. All order history, tokens, revenue, and customer records will be safely preserved.')) return;
+      try {
+        const res = await window.quickprintApi.clearAllPrintedMedia();
+        showToast(`Cleared local customer media for ${res.deletedCount || 0} completed orders!`, 'success');
+        await refreshMediaStorageStats();
+        await fetchJobs();
+      } catch (err) {
+        showToast('Error clearing printed media: ' + err.message, 'danger');
+      }
+    });
+  }
+
   // --- STARTUP BOOTSTRAP ---
-  loadSession();
+  loadSession().then(() => {
+    refreshMediaStorageStats();
+    if (window.quickprintApi?.getPrinterHealth) {
+      window.quickprintApi.getPrinterHealth(defaultPrinterName).then((h) => updatePrinterHealthDisplay(h));
+    }
+  });
 })();

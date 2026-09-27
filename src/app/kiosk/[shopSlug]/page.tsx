@@ -18,9 +18,12 @@ import {
   Folder,
   Layers,
   Sparkles,
+  RotateCw,
+  Image as ImageIcon,
+  ScanLine,
 } from 'lucide-react';
 import { inspectUploadedFile, formatBytes } from '@/lib/pdf-inspector';
-import { calculatePrintPrice, DEFAULT_PRICE_CONFIG } from '@/lib/price-calculator';
+import { calculatePrintPrice, DEFAULT_PRICE_CONFIG, PriceCalculationResult } from '@/lib/price-calculator';
 import { Shop } from '@/types/database';
 
 export interface FileItem {
@@ -29,64 +32,25 @@ export interface FileItem {
   name: string;
   size: number;
   type: 'pdf' | 'png' | 'jpg' | 'doc';
+  /** 'document' = PDF/Doc on plain paper, 'image' = JPG/PNG on plain paper, 'photo' = photo paper prints */
+  mode: 'document' | 'photo' | 'image';
   previewUrl: string;
   pages: number;
   selectedPages: number[];
-  paperType: 'plain' | 'glossy';
-  paperSize: 'a4' | 'a3' | 'custom' | 'passport';
-  copies: number;
-  quality: 'normal' | 'high';
+  // Document / Image attributes
+  paperSize: string;
+  paperType: string;
+  quality: string;
   sides: 'single' | 'duplex';
   colorMode: 'bw' | 'color';
+  // Photo attributes
+  photoSize: string;
+  photoPaper: string;
+  photoQuality: string;
+  // Common attributes
+  orientation: 'portrait' | 'landscape';
+  copies: number;
 }
-
-const DEFAULT_SAMPLE_FILES: FileItem[] = [
-  {
-    id: 'sample-1',
-    name: 'NON-DISCLOSURE AGREEMENT (NDA).pdf',
-    size: 1.4 * 1024 * 1024,
-    type: 'pdf',
-    previewUrl: 'https://images.unsplash.com/photo-1568667256549-094345857637?auto=format&fit=crop&w=400&q=80',
-    pages: 2,
-    selectedPages: [1, 2],
-    paperType: 'plain',
-    paperSize: 'a4',
-    copies: 1,
-    quality: 'normal',
-    sides: 'single',
-    colorMode: 'bw',
-  },
-  {
-    id: 'sample-2',
-    name: '10th Marksheet.png',
-    size: 1.4 * 1024 * 1024,
-    type: 'png',
-    previewUrl: 'https://images.unsplash.com/photo-1606326608606-aa0b62935f2b?auto=format&fit=crop&w=400&q=80',
-    pages: 1,
-    selectedPages: [1],
-    paperType: 'glossy',
-    paperSize: 'a4',
-    copies: 1,
-    quality: 'high',
-    sides: 'single',
-    colorMode: 'color',
-  },
-  {
-    id: 'sample-3',
-    name: '12th Marksheet.png',
-    size: 1.3 * 1024 * 1024,
-    type: 'png',
-    previewUrl: 'https://images.unsplash.com/photo-1544717305-2782549b5136?auto=format&fit=crop&w=400&q=80',
-    pages: 1,
-    selectedPages: [1],
-    paperType: 'glossy',
-    paperSize: 'a4',
-    copies: 1,
-    quality: 'high',
-    sides: 'single',
-    colorMode: 'color',
-  },
-];
 
 export default function KioskUploadPage() {
   const params = useParams();
@@ -98,8 +62,8 @@ export default function KioskUploadPage() {
   const [loadingShop, setLoadingShop] = useState(true);
   const [isProcessingUpload, setIsProcessingUpload] = useState(false);
 
-  // Files in user's cart
-  const [files, setFiles] = useState<FileItem[]>(DEFAULT_SAMPLE_FILES);
+  // Real files in user's cart (NO MOCK/FAKE DATA)
+  const [files, setFiles] = useState<FileItem[]>([]);
 
   // Modal Sheet State for Editing a file
   const [activeEditingFileId, setActiveEditingFileId] = useState<string | null>(null);
@@ -108,6 +72,7 @@ export default function KioskUploadPage() {
 
   const photoInputRef = useRef<HTMLInputElement | null>(null);
   const docInputRef = useRef<HTMLInputElement | null>(null);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
 
   // Load shop data & cached context
   useEffect(() => {
@@ -147,35 +112,67 @@ export default function KioskUploadPage() {
 
   const priceCfg = shop?.price_config || DEFAULT_PRICE_CONFIG;
 
-  // Calculate dynamic price for a specific file item
-  const getFilePrice = (item: FileItem): number => {
+  // Calculate dynamic price & itemized breakdown for any file item
+  const getFileCalculation = (item: FileItem): PriceCalculationResult => {
     const pagesToPrint = item.selectedPages.length || item.pages || 1;
-    const calc = calculatePrintPrice({
+    // 'image' mode prints on plain paper — use document mode pricing
+    const effectiveMode = item.mode === 'image' ? 'document' : item.mode;
+    const isPhotoMode = effectiveMode === 'photo';
+    return calculatePrintPrice({
+      mode: effectiveMode,
       pages: pagesToPrint,
       copies: item.copies || 1,
       colorMode: item.colorMode,
       paperSize: item.paperSize,
-      duplex: item.sides === 'duplex' && pagesToPrint > 1,
+      paperType: item.paperType,
+      quality: item.quality,
+      // CRITICAL: only pass photo params when actually in photo mode.
+      // Otherwise photoSize being truthy triggers photo pricing in price-calculator.
+      photoSize: isPhotoMode ? item.photoSize : undefined,
+      photoPaper: isPhotoMode ? item.photoPaper : undefined,
+      photoQuality: isPhotoMode ? item.photoQuality : undefined,
+      orientation: item.orientation,
+      duplex: effectiveMode === 'document' && item.sides === 'duplex' && pagesToPrint > 1,
       priceConfig: priceCfg,
     });
-    return calc.total;
   };
 
   // Total amount for all items in cart
   const totalPrice = useMemo(() => {
-    return files.reduce((acc, item) => acc + getFilePrice(item), 0);
+    return files.reduce((acc, item) => acc + getFileCalculation(item).total, 0);
   }, [files, priceCfg]);
 
   // Handle incoming file selection (Photos or Documents)
   const handleIncomingFiles = async (
     incoming: FileList | File[] | null,
-    defaultType: 'photo' | 'doc'
+    defaultMode: 'photo' | 'document' | 'image'
   ) => {
     if (!incoming || incoming.length === 0) return;
     setIsProcessingUpload(true);
 
     try {
       const newItems: FileItem[] = [];
+
+      // Determine available shop options to use as defaults
+      const availablePaperSizes = Object.keys(priceCfg.paperSizes || {}).filter(
+        (k) => priceCfg.paperSizes?.[k]?.enabled !== false
+      );
+      const defaultPaperSize = availablePaperSizes.includes('a4') ? 'a4' : availablePaperSizes[0] || 'a4';
+
+      const availablePaperTypes = Object.keys(priceCfg.paperTypes || {}).filter(
+        (k) => priceCfg.paperTypes?.[k]?.enabled !== false
+      );
+      const defaultPaperType = availablePaperTypes.includes('plain') ? 'plain' : availablePaperTypes[0] || 'plain';
+
+      const availablePhotoSizes = Object.keys(priceCfg.photoSizes || {}).filter(
+        (k) => priceCfg.photoSizes?.[k]?.enabled !== false
+      );
+      const defaultPhotoSize = availablePhotoSizes.includes('4x6') ? '4x6' : availablePhotoSizes[0] || '4x6';
+
+      const availablePhotoPapers = Object.keys(priceCfg.photoPapers || {}).filter(
+        (k) => priceCfg.photoPapers?.[k]?.enabled !== false
+      );
+      const defaultPhotoPaper = availablePhotoPapers.includes('glossy') ? 'glossy' : availablePhotoPapers[0] || 'glossy';
 
       for (let i = 0; i < incoming.length; i++) {
         const f = incoming[i];
@@ -197,25 +194,26 @@ export default function KioskUploadPage() {
           name: f.name,
           size: f.size,
           type: normType,
+          mode: defaultMode,
           previewUrl: objectUrl,
           pages: totalPages,
           selectedPages,
-          paperType: defaultType === 'photo' ? 'glossy' : 'plain',
-          paperSize: 'a4',
-          copies: 1,
-          quality: defaultType === 'photo' ? 'high' : 'normal',
+          paperSize: defaultPaperSize,
+          paperType: defaultPaperType,
+          quality: 'normal',
           sides: 'single',
-          colorMode: defaultType === 'photo' ? 'color' : 'bw',
+          colorMode: defaultMode === 'photo' ? 'color' : 'bw',
+          photoSize: defaultPhotoSize,
+          photoPaper: defaultPhotoPaper,
+          photoQuality: 'standard',
+          orientation: 'portrait',
+          copies: 1,
         });
+        // For 'image' mode, auto-assign to document mode internally for price calculation
+        // but keep mode='image' so the UI knows it was an image upload
       }
 
-      // If existing list only contains sample placeholders, replace them; otherwise append
-      const isOnlySamples = files.every((item) => item.id.startsWith('sample-'));
-      if (isOnlySamples) {
-        setFiles(newItems);
-      } else {
-        setFiles((prev) => [...prev, ...newItems]);
-      }
+      setFiles((prev) => [...prev, ...newItems]);
     } catch (err) {
       console.error('Failed to parse uploaded files:', err);
     } finally {
@@ -235,6 +233,11 @@ export default function KioskUploadPage() {
     return files.find((f) => f.id === activeEditingFileId) || null;
   }, [files, activeEditingFileId]);
 
+  const activeCalculation = useMemo(() => {
+    if (!activeEditingFile) return null;
+    return getFileCalculation(activeEditingFile);
+  }, [activeEditingFile, priceCfg]);
+
   const updateActiveEditingFile = (updates: Partial<FileItem>) => {
     if (!activeEditingFileId) return;
     setFiles((prev) =>
@@ -242,7 +245,7 @@ export default function KioskUploadPage() {
     );
   };
 
-  // Merge all files into a single master PDF document for checkout & spooling
+  // Merge and bundle files for checkout
   const handleProceedToPrint = async () => {
     if (files.length === 0) return;
 
@@ -258,7 +261,6 @@ export default function KioskUploadPage() {
 
           if (cleanName.endsWith('.pdf')) {
             const donorPdf = await PDFDocument.load(buffer, { ignoreEncryption: true });
-            // Copy only user-selected pages
             const validPageIndices = (item.selectedPages || [])
               .map((p) => p - 1)
               .filter((idx) => idx >= 0 && idx < donorPdf.getPageCount());
@@ -298,33 +300,58 @@ export default function KioskUploadPage() {
         }
       }
 
-      // If user kept sample files without uploading custom ones, create a clean bundle PDF
-      if (masterPdf.getPageCount() === 0) {
-        const dummyPage = masterPdf.addPage([595.28, 841.89]);
-        const { rgb } = await import('pdf-lib');
-        dummyPage.drawText('QuickPrint Bundle Order', { x: 50, y: 800, size: 20, color: rgb(0, 0, 0) });
-      }
-
       const mergedBytes = await masterPdf.save();
       const finalBlob = new Blob([mergedBytes as unknown as BlobPart], { type: 'application/pdf' });
+      const totalMergedPages = masterPdf.getPageCount();
       const finalFileName =
         files.length === 1 ? files[0].name : `QuickPrint_Order_${files.length}_Files.pdf`;
 
-      // Save to sessionStorage for checkout
+      const primary = files[0];
+      // Determine aggregate color mode: if ANY file is color, the job is color
+      const aggregateColorMode = files.some((f) => f.colorMode === 'color') ? 'color' : 'bw';
+      const aggregateDuplex = files.some((f) => f.sides === 'duplex');
       const reader = new FileReader();
       reader.onload = () => {
         try {
           sessionStorage.setItem('qp_file_name', finalFileName);
           sessionStorage.setItem('qp_file_type', 'application/pdf');
-          sessionStorage.setItem('qp_file_pages', String(masterPdf.getPageCount()));
+          sessionStorage.setItem('qp_file_pages', String(totalMergedPages));
+          sessionStorage.setItem('qp_pages', String(totalMergedPages)); // alias for checkout
           sessionStorage.setItem('qp_file_size', String(finalBlob.size));
           sessionStorage.setItem('qp_file_data', reader.result as string);
           sessionStorage.setItem('qp_price', String(totalPrice));
-          sessionStorage.setItem('qp_copies', String(files[0]?.copies || 1));
-          sessionStorage.setItem('qp_color_mode', files.some((f) => f.colorMode === 'color') ? 'color' : 'bw');
-          sessionStorage.setItem('qp_paper_size', files[0]?.paperSize || 'a4');
-          sessionStorage.setItem('qp_duplex', String(files.some((f) => f.sides === 'duplex')));
+          // Use 'document' mode for image files (they print on normal paper)
+          sessionStorage.setItem('qp_mode', primary.mode === 'image' ? 'document' : primary.mode);
+          sessionStorage.setItem('qp_paper_size', primary.paperSize);
+          sessionStorage.setItem('qp_paper_type', primary.paperType);
+          sessionStorage.setItem('qp_quality', primary.quality);
+          sessionStorage.setItem('qp_photo_size', primary.photoSize || '');
+          sessionStorage.setItem('qp_photo_paper', primary.photoPaper || '');
+          sessionStorage.setItem('qp_photo_quality', primary.photoQuality || '');
+          sessionStorage.setItem('qp_orientation', primary.orientation);
+          sessionStorage.setItem('qp_selected_pages', JSON.stringify(primary.selectedPages));
+          sessionStorage.setItem('qp_copies', String(primary.copies || 1));
+          sessionStorage.setItem('qp_color_mode', aggregateColorMode);
+          sessionStorage.setItem('qp_duplex', String(aggregateDuplex));
           sessionStorage.setItem('qp_files_count', String(files.length));
+          // Store full per-file configs for accurate checkout display
+          const fileConfigs = files.map((f) => ({
+            name: f.name,
+            pages: f.selectedPages.length || f.pages,
+            copies: f.copies,
+            mode: f.mode === 'image' ? 'document' : f.mode,
+            colorMode: f.colorMode,
+            paperSize: f.paperSize,
+            paperType: f.paperType,
+            quality: f.quality,
+            sides: f.sides,
+            photoSize: f.photoSize,
+            photoPaper: f.photoPaper,
+            photoQuality: f.photoQuality,
+            orientation: f.orientation,
+            price: getFileCalculation(f).total,
+          }));
+          sessionStorage.setItem('qp_file_configs', JSON.stringify(fileConfigs));
         } catch (e) {
           console.warn('Storage warning:', e);
         }
@@ -333,7 +360,6 @@ export default function KioskUploadPage() {
       reader.readAsDataURL(finalBlob);
     } catch (err) {
       console.error('Failed to bundle files:', err);
-      // Fallback redirect with default
       sessionStorage.setItem('qp_file_name', files[0]?.name || 'Document.pdf');
       sessionStorage.setItem('qp_price', String(totalPrice));
       router.push(`/kiosk/${shopSlug}/checkout`);
@@ -412,7 +438,16 @@ export default function KioskUploadPage() {
         accept=".pdf,.doc,.docx,.txt,.rtf,.ppt,.pptx"
         multiple
         className="hidden"
-        onChange={(e) => handleIncomingFiles(e.target.files, 'doc')}
+        onChange={(e) => handleIncomingFiles(e.target.files, 'document')}
+      />
+      {/* Image input — prints images on plain A4/paper (not photo paper) */}
+      <input
+        ref={imageInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp,image/bmp"
+        multiple
+        className="hidden"
+        onChange={(e) => handleIncomingFiles(e.target.files, 'image')}
       />
 
       {/* Main Container - 440px Mobile First */}
@@ -420,7 +455,6 @@ export default function KioskUploadPage() {
         {/* TOP STATUS BAR & HEADER */}
         <header className="flex items-center justify-between pt-2 pb-4">
           <div className="flex items-center gap-3">
-            {/* 4-Square Logo */}
             <div className="w-10 h-10 grid grid-cols-2 gap-1 p-1 bg-white rounded-lg border border-slate-100 shadow-xs">
               <div className="bg-[#0F172A] rounded-xs" />
               <div className="bg-[#38BDF8] rounded-xs" />
@@ -447,54 +481,77 @@ export default function KioskUploadPage() {
           </div>
         </header>
 
-        {/* HERO ACTION BUTTONS (Print Photos & Print Document) */}
+        {/* HERO ACTION BUTTONS (Print Photos, Print Image & Print Document) */}
         <section className="flex flex-col gap-3 mt-2">
-          {/* Card 1: Print Photos */}
+          {/* Card 1: Print Photos — on photo paper (4x6, 5x7, passport, etc.) */}
           <button
             type="button"
             onClick={() => photoInputRef.current?.click()}
             className="w-full h-[88px] bg-[#388EC3] hover:brightness-105 active:scale-[0.99] transition-all rounded-[11px] px-6 flex items-center justify-between text-white shadow-sm"
           >
             <div className="flex items-center gap-4">
-              {/* Photo Printer Icon */}
               <div className="w-12 h-12 flex items-center justify-center">
-                <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M6 9V2h12v7" />
-                  <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
-                  <path d="M6 14h12v8H6z" />
-                  <circle cx="10" cy="18" r="1.5" fill="currentColor" />
-                  <path d="m15 20-3-3-4 4" />
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="2" />
+                  <circle cx="8.5" cy="8.5" r="1.5" fill="currentColor" />
+                  <polyline points="21 15 16 10 5 21" />
                 </svg>
               </div>
-              <span className="text-[23px] font-normal tracking-wide" style={{ fontFamily: "'ABeeZee', sans-serif" }}>
-                Print Photos
-              </span>
+              <div className="flex flex-col items-start">
+                <span className="text-[22px] font-normal tracking-wide leading-tight" style={{ fontFamily: "'ABeeZee', sans-serif" }}>Print Photos</span>
+                <span className="text-[11px] text-white/70 leading-none mt-0.5">Photo paper · 4×6, 5×7, Passport</span>
+              </div>
             </div>
             <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-white">
               <Plus className="w-5 h-5" />
             </div>
           </button>
 
-          {/* Card 2: Print Document */}
+          {/* Card 2: Print Image — JPG/PNG on plain paper (A4, B&W/Color) */}
+          <button
+            type="button"
+            onClick={() => imageInputRef.current?.click()}
+            className="w-full h-[88px] bg-[#2563EB] hover:brightness-105 active:scale-[0.99] transition-all rounded-[11px] px-6 flex items-center justify-between text-white shadow-sm"
+          >
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 flex items-center justify-center">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="2" />
+                  <circle cx="8.5" cy="8.5" r="1.5" fill="currentColor" />
+                  <path d="m21 15-5-5-4 4-2-2-5 5" />
+                  <path d="M3 17h18" strokeDasharray="2 2" />
+                </svg>
+              </div>
+              <div className="flex flex-col items-start">
+                <span className="text-[22px] font-normal tracking-wide leading-tight" style={{ fontFamily: "'ABeeZee', sans-serif" }}>Print Image</span>
+                <span className="text-[11px] text-white/70 leading-none mt-0.5">JPG/PNG on plain paper · A4 · B&W or Color</span>
+              </div>
+            </div>
+            <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-white">
+              <Plus className="w-5 h-5" />
+            </div>
+          </button>
+
+          {/* Card 3: Print Document — PDF/DOCX on plain paper */}
           <button
             type="button"
             onClick={() => docInputRef.current?.click()}
-            className="w-full h-[88px] bg-[#347DD6] hover:brightness-105 active:scale-[0.99] transition-all rounded-[11px] px-6 flex items-center justify-between text-white shadow-sm"
+            className="w-full h-[88px] bg-[#334155] hover:brightness-105 active:scale-[0.99] transition-all rounded-[11px] px-6 flex items-center justify-between text-white shadow-sm"
           >
             <div className="flex items-center gap-4">
-              {/* Document Printer Icon */}
               <div className="w-12 h-12 flex items-center justify-center">
-                <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M6 9V2h12v7" />
-                  <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
-                  <path d="M6 14h12v8H6z" />
-                  <path d="M9 17h6" />
-                  <path d="M9 19.5h4" />
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                  <line x1="16" y1="13" x2="8" y2="13" />
+                  <line x1="16" y1="17" x2="8" y2="17" />
+                  <polyline points="10 9 9 9 8 9" />
                 </svg>
               </div>
-              <span className="text-[22px] font-normal tracking-wide" style={{ fontFamily: "'ABeeZee', sans-serif" }}>
-                Print Document
-              </span>
+              <div className="flex flex-col items-start">
+                <span className="text-[22px] font-normal tracking-wide leading-tight" style={{ fontFamily: "'ABeeZee', sans-serif" }}>Print Document</span>
+                <span className="text-[11px] text-white/70 leading-none mt-0.5">PDF, Word, Text · A4/A3/Legal</span>
+              </div>
             </div>
             <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-white">
               <Plus className="w-5 h-5" />
@@ -523,176 +580,201 @@ export default function KioskUploadPage() {
             <div className="flex items-center gap-2">
               <Folder className="w-5 h-5 text-[#2563EB] fill-[#2563EB]" />
               <h3 className="text-[14px] font-normal text-[#0F172A] tracking-tight" style={{ fontFamily: "'ABeeZee', sans-serif" }}>
-                Recent Uploads & Files
+                Recent Uploads & Files ({files.length})
               </h3>
             </div>
-            <button
-              type="button"
-              onClick={() => docInputRef.current?.click()}
-              className="text-[12px] text-[#2563EB] font-normal hover:underline"
-              style={{ fontFamily: "'ABeeZee', sans-serif" }}
-            >
-              + Add Files
-            </button>
+            {files.length > 0 && (
+              <button
+                type="button"
+                onClick={() => docInputRef.current?.click()}
+                className="text-[12px] text-[#2563EB] font-normal hover:underline"
+                style={{ fontFamily: "'ABeeZee', sans-serif" }}
+              >
+                + Add More
+              </button>
+            )}
           </div>
 
-          {/* Horizontal Scroll Carousel */}
-          <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-none snap-x -mx-4 px-4">
-            {files.map((item) => {
-              const isPdf = item.type === 'pdf';
-              const isBw = item.colorMode === 'bw';
+          {/* If No Files: Clean Inviting Empty State (NO MOCK DATA) */}
+          {files.length === 0 ? (
+            <div className="w-full border-2 border-dashed border-slate-200 rounded-[16px] p-6 text-center flex flex-col items-center justify-center bg-slate-50/50">
+              <div className="w-12 h-12 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center mb-2">
+                <Printer className="w-6 h-6 text-blue-600" />
+              </div>
+              <h4 className="text-[13px] font-bold text-slate-800">No files uploaded yet</h4>
+              <p className="text-[11px] text-slate-500 mt-1 max-w-[260px]">
+                Tap <strong>Print Photos</strong> or <strong>Print Document</strong> above to select and customize your prints.
+              </p>
+            </div>
+          ) : (
+            /* Horizontal Scroll Carousel */
+            <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-none snap-x -mx-4 px-4">
+              {files.map((item) => {
+                const isPdf = item.type === 'pdf';
+                const isBw = item.colorMode === 'bw';
+                const calc = getFileCalculation(item);
 
-              return (
-                <div
-                  key={item.id}
-                  onClick={() => {
-                    setActiveEditingFileId(item.id);
-                    setActivePreviewPageIndex(0);
-                  }}
-                  className="w-[145px] shrink-0 bg-white border border-[#E2E8F0] rounded-[16px] overflow-hidden flex flex-col justify-between cursor-pointer hover:border-blue-400 hover:shadow-sm transition-all group relative snap-start"
-                >
-                  {/* Delete Button on Hover */}
-                  <button
-                    type="button"
-                    onClick={(e) => removeFile(item.id, e)}
-                    className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/60 text-white flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity z-10 hover:bg-red-600"
-                    title="Remove File"
+                return (
+                  <div
+                    key={item.id}
+                    onClick={() => {
+                      setActiveEditingFileId(item.id);
+                      setActivePreviewPageIndex(0);
+                    }}
+                    className="w-[145px] shrink-0 bg-white border border-[#E2E8F0] rounded-[16px] overflow-hidden flex flex-col justify-between cursor-pointer hover:border-blue-400 hover:shadow-sm transition-all group relative snap-start"
                   >
-                    ×
-                  </button>
+                    {/* Delete Button on Hover */}
+                    <button
+                      type="button"
+                      onClick={(e) => removeFile(item.id, e)}
+                      className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/60 text-white flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity z-10 hover:bg-red-600"
+                      title="Remove File"
+                    >
+                      ×
+                    </button>
 
-                  {/* Thumbnail Preview Area */}
-                  <div className="w-full h-[96px] bg-slate-100 relative overflow-hidden flex items-center justify-center border-b border-[#E2E8F0]/70">
-                    {item.previewUrl ? (
-                      <img
-                        src={item.previewUrl}
-                        alt={item.name}
-                        className="w-full h-full object-cover object-top opacity-95"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex flex-col items-center justify-center bg-slate-50 text-slate-400">
-                        <FileText className="w-8 h-8" />
+                     {/* Thumbnail Preview Area */}
+                    <div className="w-full h-[96px] bg-slate-100 relative overflow-hidden flex items-center justify-center border-b border-[#E2E8F0]/70">
+                      {item.type === 'pdf' ? (
+                        // PDF thumbnail: render via iframe scaled down
+                        <div className="w-full h-full relative overflow-hidden">
+                          <iframe
+                            src={`${item.previewUrl}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`}
+                            className="border-0 pointer-events-none absolute top-0 left-0 origin-top-left"
+                            style={{ width: '400%', height: '400%', transform: 'scale(0.25)', filter: isBw ? 'grayscale(100%)' : 'none' }}
+                            title={item.name}
+                          />
+                        </div>
+                      ) : item.type === 'doc' ? (
+                        // Word/Doc: can't render in browser — show icon
+                        <div className="w-full h-full flex flex-col items-center justify-center bg-blue-50 text-blue-400 gap-1">
+                          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="text-blue-500">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" />
+                          </svg>
+                          <span className="text-[9px] font-bold text-blue-500 uppercase tracking-wider">WORD</span>
+                        </div>
+                      ) : item.previewUrl ? (
+                        <img
+                          src={item.previewUrl}
+                          alt={item.name}
+                          className="w-full h-full object-cover object-top opacity-95"
+                          style={{ filter: isBw ? 'grayscale(100%)' : 'none' }}
+                        />
+                      ) : (
+                        <div className="w-full h-full flex flex-col items-center justify-center bg-slate-50 text-slate-400">
+                          <FileText className="w-8 h-8" />
+                        </div>
+                      )}
+
+                      {/* Filetype Badge */}
+                      <div className="absolute left-1.5 bottom-1.5">
+                        <span
+                          className={`text-[8px] font-normal uppercase px-1.5 py-0.5 rounded text-white flex items-center gap-1 tracking-wider ${
+                            isPdf ? 'bg-[#F43F5E]' : 'bg-[#2563EB]'
+                          }`}
+                          style={{ fontFamily: "'ABeeZee', sans-serif" }}
+                        >
+                          {item.type.toUpperCase()}
+                        </span>
                       </div>
-                    )}
+                    </div>
 
-                    {/* Filetype Badge */}
-                    <div className="absolute left-1.5 bottom-1.5">
-                      <span
-                        className={`text-[8px] font-normal uppercase px-1.5 py-0.5 rounded text-white flex items-center gap-1 tracking-wider ${
-                          isPdf ? 'bg-[#F43F5E]' : 'bg-[#2563EB]'
-                        }`}
+                    {/* Details Area */}
+                    <div className="p-2.5 flex flex-col gap-1.5 bg-white">
+                      <h5
+                        className="text-[11px] font-normal text-[#1E293B] truncate leading-tight"
                         style={{ fontFamily: "'ABeeZee', sans-serif" }}
+                        title={item.name}
                       >
-                        {isPdf ? (
-                          <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                            <polyline points="14 2 14 8 20 8" />
-                          </svg>
-                        ) : (
-                          <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                            <circle cx="8.5" cy="8.5" r="1.5" />
-                            <polyline points="21 15 16 10 5 21" />
-                          </svg>
-                        )}
-                        {item.type.toUpperCase()}
-                      </span>
+                        {item.name}
+                      </h5>
+
+                      <p
+                        className="text-[10px] text-[#64748B] leading-none"
+                        style={{ fontFamily: "'Inter', sans-serif" }}
+                      >
+                        {item.pages > 1 ? `${item.selectedPages.length || item.pages} pgs • ` : ''}
+                        {formatBytes(item.size)}
+                      </p>
+
+                      <div className="flex items-center justify-between pt-1">
+                        <span
+                          className={`text-[9px] px-1.5 py-0.5 rounded leading-none ${
+                            item.mode === 'photo'
+                              ? 'bg-gradient-to-r from-[#89D2FF] via-[#A8CFFF] to-[#FF9D9F] text-black font-medium'
+                              : item.mode === 'image'
+                              ? 'bg-purple-100 text-purple-700 font-medium'
+                              : isBw
+                              ? 'bg-[#F1F5F9] text-[#475569]'
+                              : 'bg-blue-100 text-blue-700 font-medium'
+                          }`}
+                          style={{ fontFamily: "'ABeeZee', sans-serif" }}
+                        >
+                          {item.mode === 'photo' ? 'Photo' : item.mode === 'image' ? 'Image' : isBw ? 'B&W' : 'Color'}
+                        </span>
+
+                        <span className="text-[10px] font-bold text-slate-900 font-mono">
+                          ₹{calc.total.toFixed(0)}
+                        </span>
+                      </div>
                     </div>
                   </div>
-
-                  {/* Details Area */}
-                  <div className="p-2.5 flex flex-col gap-1.5 bg-white">
-                    <h5
-                      className="text-[11px] font-normal text-[#1E293B] truncate leading-tight"
-                      style={{ fontFamily: "'ABeeZee', sans-serif" }}
-                      title={item.name}
-                    >
-                      {item.name}
-                    </h5>
-
-                    <p
-                      className="text-[10px] text-[#64748B] leading-none"
-                      style={{ fontFamily: "'Inter', sans-serif" }}
-                    >
-                      {item.pages > 1 ? `${item.pages} pages • ` : ''}
-                      {formatBytes(item.size)} • {item.type.toUpperCase()}
-                    </p>
-
-                    <div className="flex items-center justify-between pt-1">
-                      {/* Mode Tag */}
-                      <span
-                        className={`text-[9px] px-1.5 py-0.5 rounded leading-none ${
-                          isBw
-                            ? 'bg-[#F1F5F9] text-[#475569]'
-                            : 'bg-gradient-to-r from-[#89D2FF] via-[#A8CFFF] to-[#FF9D9F] text-black font-medium'
-                        }`}
-                        style={{ fontFamily: "'ABeeZee', sans-serif" }}
-                      >
-                        {isBw ? 'B&W' : 'Glossy Color'}
-                      </span>
-
-                      {/* Edit Button */}
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setActiveEditingFileId(item.id);
-                          setActivePreviewPageIndex(0);
-                        }}
-                        className="text-[9px] text-[#0069FF] font-semibold hover:underline"
-                        style={{ fontFamily: "'ABeeZee', sans-serif" }}
-                      >
-                        Edit
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </section>
 
         {/* PRINT ORDER SUMMARY CARD */}
         <section className="mt-5 p-3.5 bg-[#F8FAFC] border border-[#E2E8F0]/80 rounded-[16px] shadow-xs">
-          <div className="flex items-center gap-2 pb-2.5 border-b border-[#E2E8F0]/70">
-            <div className="w-6 h-6 rounded-[8px] bg-[#EFF6FF] flex items-center justify-center text-[#2563EB]">
-              <FileText className="w-3.5 h-3.5 text-[#2563EB]" />
+          <div className="flex items-center justify-between pb-2.5 border-b border-[#E2E8F0]/70">
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 rounded-[8px] bg-[#EFF6FF] flex items-center justify-center text-[#2563EB]">
+                <FileText className="w-3.5 h-3.5 text-[#2563EB]" />
+              </div>
+              <h4 className="text-[12px] font-normal text-[#1E293B] tracking-tight" style={{ fontFamily: "'ABeeZee', sans-serif" }}>
+                Print Order Summary
+              </h4>
             </div>
-            <h4 className="text-[12px] font-normal text-[#1E293B] tracking-tight" style={{ fontFamily: "'ABeeZee', sans-serif" }}>
-              Print Order Summary
-            </h4>
+            <span className="text-[11px] font-semibold text-slate-500">
+              {files.length} {files.length === 1 ? 'Item' : 'Items'}
+            </span>
           </div>
 
           <div className="flex flex-col gap-2 pt-2.5">
-            {files.map((item) => {
-              const itemPrice = getFilePrice(item);
-              const isColor = item.colorMode === 'color';
+            {files.length === 0 ? (
+              <p className="text-[11px] text-slate-400 py-1 italic">No files in order queue</p>
+            ) : (
+              files.map((item) => {
+                const calc = getFileCalculation(item);
+                const isColor = item.colorMode === 'color';
 
-              return (
-                <div key={item.id} className="flex items-center justify-between text-[12px]">
-                  <div className="flex items-center gap-2 max-w-[280px]">
+                return (
+                  <div key={item.id} className="flex items-center justify-between text-[12px]">
+                    <div className="flex items-center gap-2 max-w-[280px]">
+                      <span
+                        className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                          isColor ? 'bg-[#0EA5E9]' : 'bg-[#94A3B8]'
+                        }`}
+                      />
+                      <span
+                        className="truncate text-[#1E293B]"
+                        style={{ fontFamily: "'ABeeZee', sans-serif" }}
+                        title={item.name}
+                      >
+                        {item.name}
+                      </span>
+                    </div>
                     <span
-                      className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                        isColor ? 'bg-[#0EA5E9]' : 'bg-[#94A3B8]'
-                      }`}
-                    />
-                    <span
-                      className="truncate text-[#1E293B]"
+                      className="font-normal text-[#1E293B] font-mono shrink-0"
                       style={{ fontFamily: "'ABeeZee', sans-serif" }}
-                      title={item.name}
                     >
-                      {item.name}
+                      ₹{calc.total.toFixed(0)}
                     </span>
                   </div>
-                  <span
-                    className="font-normal text-[#1E293B] font-mono shrink-0"
-                    style={{ fontFamily: "'ABeeZee', sans-serif" }}
-                  >
-                    ₹{itemPrice.toFixed(0)}
-                  </span>
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </div>
         </section>
 
@@ -707,7 +789,11 @@ export default function KioskUploadPage() {
             <div className="flex items-center gap-2">
               <Printer className="w-5 h-5 text-white" />
               <span className="text-[14px] font-normal tracking-tight" style={{ fontFamily: "'ABeeZee', sans-serif" }}>
-                {isProcessingUpload ? 'Processing Bundle...' : `Pay & Print (${files.length} Files)`}
+                {isProcessingUpload
+                  ? 'Processing Bundle...'
+                  : files.length === 0
+                  ? 'Upload Files to Print'
+                  : `Pay & Print (${files.length} ${files.length === 1 ? 'File' : 'Files'})`}
               </span>
             </div>
 
@@ -718,11 +804,10 @@ export default function KioskUploadPage() {
         </div>
 
         {/* ========================================================================= */}
-        {/* PREVIEW & CONFIGURATION MODAL / BOTTOM SHEET (Matching Screenshots 2, 3, 5) */}
+        {/* PREVIEW & CONFIGURATION MODAL / BOTTOM SHEET (Document & Photo Modes) */}
         {/* ========================================================================= */}
-        {activeEditingFile && (
+        {activeEditingFile && activeCalculation && (
           <div className="fixed inset-0 z-50 flex flex-col justify-end bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
-            {/* Modal Container */}
             <div className="w-full max-w-[440px] mx-auto h-[95vh] bg-[#FFFFFF] rounded-t-[28px] overflow-hidden flex flex-col shadow-2xl animate-in slide-in-from-bottom duration-300">
               {/* Header Bar */}
               <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
@@ -736,19 +821,79 @@ export default function KioskUploadPage() {
                 >
                   <ChevronLeft className="w-6 h-6 text-slate-800" />
                 </button>
-                <h3 className="text-[17px] font-semibold text-slate-900">Preview</h3>
-                <div className="w-6" />
+                <div className="text-center">
+                  <h3 className="text-[16px] font-semibold text-slate-900">Print Preview</h3>
+                  <span className="text-[10px] text-slate-500 font-mono">{activeEditingFile.name}</span>
+                </div>
+
+                {/* Mode Switch */}
+                <select
+                  value={activeEditingFile.mode}
+                  onChange={(e) => {
+                    const newMode = e.target.value as 'document' | 'photo' | 'image';
+                    updateActiveEditingFile({
+                      mode: newMode,
+                      colorMode: newMode === 'photo' ? 'color' : activeEditingFile.colorMode,
+                    });
+                  }}
+                  className="text-[11px] font-semibold px-2 py-1 rounded-md bg-slate-100 hover:bg-slate-200 text-blue-600 border border-slate-200 outline-none cursor-pointer"
+                >
+                  <option value="document">📄 Document</option>
+                  <option value="image">🖼️ Image</option>
+                  <option value="photo">📸 Photo Print</option>
+                </select>
               </div>
 
-              {/* Document Preview Viewport */}
-              <div className="flex-1 bg-slate-50 relative flex flex-col items-center justify-center p-4 overflow-hidden">
-                <div className="w-full max-w-[280px] h-[340px] bg-white rounded-lg shadow-md border border-slate-200 overflow-hidden relative flex flex-col items-center justify-center">
+              {/* Document Preview Viewport with Real-Time Dynamic Aspect Ratio & Visual Filters */}
+              <div className="flex-1 bg-slate-100 relative flex flex-col items-center justify-center p-4 overflow-hidden">
+                {/* Responsive Aspect-Ratio Container */}
+                <div
+                  className={`max-w-[300px] max-h-[300px] w-full bg-white rounded-lg shadow-md border-2 border-slate-300 overflow-hidden relative flex flex-col items-center justify-center transition-all duration-300 ${
+                    activeEditingFile.mode === 'photo'
+                      ? activeEditingFile.photoSize === 'passport'
+                        ? 'aspect-square'
+                        : activeEditingFile.photoSize === '5x7'
+                        ? activeEditingFile.orientation === 'landscape' ? 'aspect-[7/5]' : 'aspect-[5/7]'
+                        : activeEditingFile.photoSize === '6x8'
+                        ? activeEditingFile.orientation === 'landscape' ? 'aspect-[8/6]' : 'aspect-[6/8]'
+                        : activeEditingFile.orientation === 'landscape' ? 'aspect-[6/4]' : 'aspect-[4/6]'
+                      : activeEditingFile.orientation === 'landscape' ? 'aspect-[1.414/1]' : 'aspect-[1/1.414]'
+                  }`}
+                >
                   {activeEditingFile.previewUrl ? (
-                    <img
-                      src={activeEditingFile.previewUrl}
-                      alt="Preview"
-                      className="w-full h-full object-contain"
-                    />
+                    // PDF files: use iframe to render actual content
+                    // Image/Photo files: use img tag
+                    activeEditingFile.type === 'pdf' ? (
+                      <iframe
+                        src={`${activeEditingFile.previewUrl}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`}
+                        className="w-full h-full border-0 pointer-events-none"
+                        title={activeEditingFile.name}
+                        style={{
+                          filter: activeEditingFile.colorMode === 'bw' ? 'grayscale(100%)' : 'none',
+                        }}
+                      />
+                    ) : activeEditingFile.type === 'doc' ? (
+                      // Word/Doc files can't render in browser
+                      <div className="w-full h-full flex flex-col items-center justify-center bg-blue-50/60 text-blue-400 gap-3">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-blue-500">
+                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                          <polyline points="14 2 14 8 20 8" />
+                          <line x1="16" y1="13" x2="8" y2="13" />
+                          <line x1="16" y1="17" x2="8" y2="17" />
+                        </svg>
+                        <span className="text-[11px] font-semibold text-blue-500 text-center px-3">{activeEditingFile.name}</span>
+                        <span className="text-[10px] text-blue-400">{activeEditingFile.pages} {activeEditingFile.pages === 1 ? 'page' : 'pages'}</span>
+                      </div>
+                    ) : (
+                      <img
+                        src={activeEditingFile.previewUrl}
+                        alt="Preview"
+                        className="w-full h-full object-contain transition-all"
+                        style={{
+                          filter: activeEditingFile.colorMode === 'bw' ? 'grayscale(100%)' : 'none',
+                        }}
+                      />
+                    )
                   ) : (
                     <div className="text-center p-6 text-slate-400">
                       <FileText className="w-16 h-16 mx-auto mb-2 text-slate-300" />
@@ -756,80 +901,393 @@ export default function KioskUploadPage() {
                     </div>
                   )}
 
-                  {/* Stamp badge overlay */}
-                  <div className="absolute top-2 right-2 px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-slate-900 text-white">
-                    {activeEditingFile.colorMode.toUpperCase()}
+                  {/* Top HUD Badges */}
+                  <div className="absolute top-2 left-2 px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-black/75 text-white backdrop-blur-xs shadow-xs">
+                    {activeEditingFile.colorMode === 'bw' ? 'B&W Grayscale' : 'Full Color'}
+                  </div>
+                  <div className="absolute top-2 right-2 px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-blue-600 text-white shadow-xs">
+                    {activeEditingFile.mode === 'photo'
+                      ? activeEditingFile.photoSize.toUpperCase()
+                      : activeEditingFile.paperSize.toUpperCase()}
+                  </div>
+
+                  {/* Bottom HUD Badges */}
+                  <div className="absolute bottom-2 left-2 px-2 py-0.5 rounded text-[9px] font-medium bg-white/90 text-slate-800 border border-slate-300 shadow-xs">
+                    {activeEditingFile.orientation === 'landscape' ? 'Landscape' : 'Portrait'} •{' '}
+                    {activeEditingFile.mode === 'photo'
+                      ? activeEditingFile.photoPaper
+                      : activeEditingFile.paperType}
+                  </div>
+
+                  {activeEditingFile.mode === 'document' && activeEditingFile.sides === 'duplex' && (
+                    <div className="absolute bottom-2 right-2 px-2 py-0.5 rounded text-[9px] font-bold bg-amber-500 text-white shadow-xs">
+                      Duplex (2-Sided)
+                    </div>
+                  )}
+                </div>
+
+                {/* Page Navigation for Multi-page Documents */}
+                {activeEditingFile.pages > 1 && (
+                  <div className="flex items-center gap-4 mt-3">
+                    <button
+                      type="button"
+                      onClick={() => setActivePreviewPageIndex((p) => Math.max(0, p - 1))}
+                      disabled={activePreviewPageIndex === 0}
+                      className="p-1 text-slate-600 disabled:opacity-30"
+                    >
+                      <ChevronLeft className="w-5 h-5" />
+                    </button>
+                    <span className="text-[13px] font-medium text-slate-700">
+                      Page {activePreviewPageIndex + 1} of {activeEditingFile.pages}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setActivePreviewPageIndex((p) =>
+                          Math.min((activeEditingFile.pages || 1) - 1, p + 1)
+                        )
+                      }
+                      disabled={activePreviewPageIndex >= (activeEditingFile.pages || 1) - 1}
+                      className="p-1 text-slate-600 disabled:opacity-30"
+                    >
+                      <ChevronRight className="w-5 h-5" />
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* iOS BOTTOM SHEET DRAWER (Dynamic Print Configuration & Real-Time Price) */}
+              <div className="bg-white px-5 pt-3 pb-6 rounded-t-[24px] shadow-[0_-4px_20px_rgba(0,0,0,0.06)] border-t border-slate-100 flex flex-col gap-3 overflow-y-auto max-h-[52vh]">
+                <div className="w-10 h-1 bg-slate-300 rounded-full mx-auto mb-1" />
+
+                {/* Real-Time Price Strip with Itemized Breakdown */}
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex flex-col gap-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[13px] font-bold text-slate-800">
+                      Calculated Price ({activeEditingFile.copies} {activeEditingFile.copies === 1 ? 'Copy' : 'Copies'})
+                    </span>
+                    <span className="text-[17px] font-black text-blue-600 font-mono">
+                      ₹{activeCalculation.total.toFixed(2)}
+                    </span>
+                  </div>
+
+                  <div className="text-[11px] text-slate-500 flex flex-col gap-0.5 border-t border-slate-200 pt-1.5">
+                    {activeCalculation.items.map((it, idx) => (
+                      <div key={idx} className="flex justify-between">
+                        <span>{it.label}</span>
+                        <span className="font-mono">₹{it.amount.toFixed(2)}</span>
+                      </div>
+                    ))}
                   </div>
                 </div>
 
-                {/* Page Navigation 1 / 2 */}
-                <div className="flex items-center gap-4 mt-3">
-                  <button
-                    type="button"
-                    onClick={() => setActivePreviewPageIndex((p) => Math.max(0, p - 1))}
-                    disabled={activePreviewPageIndex === 0}
-                    className="p-1 text-slate-600 disabled:opacity-30"
-                  >
-                    <ChevronLeft className="w-5 h-5" />
-                  </button>
-                  <span className="text-[14px] font-medium text-slate-700">
-                    {activePreviewPageIndex + 1} / {activeEditingFile.pages || 1}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setActivePreviewPageIndex((p) =>
-                        Math.min((activeEditingFile.pages || 1) - 1, p + 1)
-                      )
-                    }
-                    disabled={activePreviewPageIndex >= (activeEditingFile.pages || 1) - 1}
-                    className="p-1 text-slate-600 disabled:opacity-30"
-                  >
-                    <ChevronRight className="w-5 h-5" />
-                  </button>
-                </div>
-              </div>
+                {/* ============================================================== */}
+                {/* IMAGE MODE OPTIONS (plain paper, no photo paper) */}
+                {/* ============================================================== */}
+                {activeEditingFile.mode === 'image' ? (
+                  <>
+                    {/* Paper Size */}
+                    <div className="flex items-center justify-between py-1 border-b border-slate-100">
+                      <span className="text-[14px] font-medium text-slate-900">Paper Size</span>
+                      <select
+                        value={activeEditingFile.paperSize}
+                        onChange={(e) => updateActiveEditingFile({ paperSize: e.target.value })}
+                        className="text-[14px] text-slate-700 bg-transparent text-right outline-none cursor-pointer font-medium"
+                      >
+                        {Object.entries(priceCfg.paperSizes || DEFAULT_PRICE_CONFIG.paperSizes || {})
+                          .filter(([_, opt]) => opt.enabled !== false)
+                          .map(([key, opt]) => (
+                            <option key={key} value={key}>
+                              {opt.name} {opt.extra > 0 ? `(+₹${opt.extra})` : ''}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
 
-              {/* iOS BOTTOM SHEET DRAWER (Print Options) */}
-              <div className="bg-white px-5 pt-3 pb-6 rounded-t-[24px] shadow-[0_-4px_20px_rgba(0,0,0,0.06)] border-t border-slate-100 flex flex-col gap-3.5 overflow-y-auto max-h-[50vh]">
-                {/* Drag Handle */}
-                <div className="w-10 h-1 bg-slate-300 rounded-full mx-auto mb-1" />
+                    {/* Color Options */}
+                    <div className="flex items-center justify-between py-1 border-b border-slate-100">
+                      <span className="text-[14px] font-medium text-slate-900">Color Options</span>
+                      <select
+                        value={activeEditingFile.colorMode}
+                        onChange={(e) => updateActiveEditingFile({ colorMode: e.target.value as 'bw' | 'color' })}
+                        className="text-[14px] text-slate-700 bg-transparent text-right outline-none cursor-pointer font-medium"
+                      >
+                        <option value="bw">Black & White (B&W)</option>
+                        <option value="color">Full Color</option>
+                      </select>
+                    </div>
 
-                {/* 1. Paper Type (Plain / Glossy) */}
-                <div className="flex items-center justify-between py-1 border-b border-slate-100">
-                  <span className="text-[14px] font-medium text-slate-900">Paper Type</span>
-                  <select
-                    value={activeEditingFile.paperType}
-                    onChange={(e) =>
-                      updateActiveEditingFile({ paperType: e.target.value as 'plain' | 'glossy' })
-                    }
-                    className="text-[14px] text-slate-600 bg-transparent text-right outline-none cursor-pointer"
-                  >
-                    <option value="plain">Plain Paper</option>
-                    <option value="glossy">Glossy Photo Paper</option>
-                  </select>
-                </div>
+                    {/* Paper Type */}
+                    <div className="flex items-center justify-between py-1 border-b border-slate-100">
+                      <span className="text-[14px] font-medium text-slate-900">Paper Type</span>
+                      <select
+                        value={activeEditingFile.paperType}
+                        onChange={(e) => updateActiveEditingFile({ paperType: e.target.value })}
+                        className="text-[14px] text-slate-700 bg-transparent text-right outline-none cursor-pointer font-medium"
+                      >
+                        {Object.entries(priceCfg.paperTypes || DEFAULT_PRICE_CONFIG.paperTypes || {})
+                          .filter(([_, opt]) => opt.enabled !== false)
+                          .map(([key, opt]) => (
+                            <option key={key} value={key}>
+                              {opt.name} {opt.extra > 0 ? `(+₹${opt.extra})` : ''}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
 
-                {/* 2. Paper (A4, A3, Legal, Passport) */}
-                <div className="flex items-center justify-between py-1 border-b border-slate-100">
-                  <span className="text-[14px] font-medium text-slate-900">Paper</span>
-                  <select
-                    value={activeEditingFile.paperSize}
-                    onChange={(e) =>
-                      updateActiveEditingFile({
-                        paperSize: e.target.value as 'a4' | 'a3' | 'custom' | 'passport',
-                      })
-                    }
-                    className="text-[14px] text-slate-600 bg-transparent text-right outline-none cursor-pointer"
-                  >
-                    <option value="a4">A4</option>
-                    <option value="a3">A3 (+₹4)</option>
-                    <option value="custom">Legal Bond (+₹2)</option>
-                    <option value="passport">Passport Photo 8x (+₹35)</option>
-                  </select>
-                </div>
+                    {/* Orientation */}
+                    <div className="flex items-center justify-between py-1 border-b border-slate-100">
+                      <span className="text-[14px] font-medium text-slate-900">Orientation</span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => updateActiveEditingFile({ orientation: 'portrait' })}
+                          className={`text-xs px-2.5 py-1 rounded font-semibold transition-all ${
+                            activeEditingFile.orientation === 'portrait' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'
+                          }`}
+                        >
+                          Portrait
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => updateActiveEditingFile({ orientation: 'landscape' })}
+                          className={`text-xs px-2.5 py-1 rounded font-semibold transition-all ${
+                            activeEditingFile.orientation === 'landscape' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'
+                          }`}
+                        >
+                          Landscape
+                        </button>
+                      </div>
+                    </div>
+                    {/* Info note */}
+                    <p className="text-[11px] text-slate-400 px-1">ℹ️ Image will be centered and scaled to fit the selected paper size.</p>
+                  </>
+                ) : activeEditingFile.mode === 'photo' ? (
+                  <>
+                {/* ============================================================== */}
+                {/* PHOTO MODE OPTIONS */}
+                {/* ============================================================== */}
+                    {/* Photo Size */}
+                    <div className="flex items-center justify-between py-1 border-b border-slate-100">
+                      <span className="text-[14px] font-medium text-slate-900">Photo Size</span>
+                      <select
+                        value={activeEditingFile.photoSize}
+                        onChange={(e) => updateActiveEditingFile({ photoSize: e.target.value })}
+                        className="text-[14px] text-slate-700 bg-transparent text-right outline-none cursor-pointer font-medium"
+                      >
+                        {Object.entries(priceCfg.photoSizes || DEFAULT_PRICE_CONFIG.photoSizes || {}).map(
+                          ([key, opt]) => (
+                            <option key={key} value={key}>
+                              {opt.name} (₹{opt.price})
+                            </option>
+                          )
+                        )}
+                      </select>
+                    </div>
 
-                {/* 3. Print (N) Copy */}
+                    {/* Photo Paper */}
+                    <div className="flex items-center justify-between py-1 border-b border-slate-100">
+                      <span className="text-[14px] font-medium text-slate-900">Photo Paper</span>
+                      <select
+                        value={activeEditingFile.photoPaper}
+                        onChange={(e) => updateActiveEditingFile({ photoPaper: e.target.value })}
+                        className="text-[14px] text-slate-700 bg-transparent text-right outline-none cursor-pointer font-medium"
+                      >
+                        {Object.entries(priceCfg.photoPapers || DEFAULT_PRICE_CONFIG.photoPapers || {}).map(
+                          ([key, opt]) => (
+                            <option key={key} value={key}>
+                              {opt.name} {opt.extra > 0 ? `(+₹${opt.extra})` : ''}
+                            </option>
+                          )
+                        )}
+                      </select>
+                    </div>
+
+                    {/* Photo Quality */}
+                    <div className="flex items-center justify-between py-1 border-b border-slate-100">
+                      <span className="text-[14px] font-medium text-slate-900">Quality</span>
+                      <select
+                        value={activeEditingFile.photoQuality}
+                        onChange={(e) => updateActiveEditingFile({ photoQuality: e.target.value })}
+                        className="text-[14px] text-slate-700 bg-transparent text-right outline-none cursor-pointer font-medium"
+                      >
+                        {Object.entries(priceCfg.photoQualities || DEFAULT_PRICE_CONFIG.photoQualities || {}).map(
+                          ([key, opt]) => (
+                            <option key={key} value={key}>
+                              {opt.name} {opt.extra > 0 ? `(+₹${opt.extra})` : ''}
+                            </option>
+                          )
+                        )}
+                      </select>
+                    </div>
+
+                    {/* Orientation */}
+                    <div className="flex items-center justify-between py-1 border-b border-slate-100">
+                      <span className="text-[14px] font-medium text-slate-900">Orientation</span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => updateActiveEditingFile({ orientation: 'portrait' })}
+                          className={`text-xs px-2.5 py-1 rounded font-semibold transition-all ${
+                            activeEditingFile.orientation === 'portrait'
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-slate-100 text-slate-600'
+                          }`}
+                        >
+                          Portrait
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => updateActiveEditingFile({ orientation: 'landscape' })}
+                          className={`text-xs px-2.5 py-1 rounded font-semibold transition-all ${
+                            activeEditingFile.orientation === 'landscape'
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-slate-100 text-slate-600'
+                          }`}
+                        >
+                          Landscape
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                ) : null}
+                {activeEditingFile.mode === 'photo' ? null : activeEditingFile.mode === 'image' ? null : (
+                  /* ============================================================== */
+                  /* DOCUMENT MODE OPTIONS */
+                  /* ============================================================== */
+                  <>
+                    {/* Paper Size */}
+                    <div className="flex items-center justify-between py-1 border-b border-slate-100">
+                      <span className="text-[14px] font-medium text-slate-900">Paper Size</span>
+                      <select
+                        value={activeEditingFile.paperSize}
+                        onChange={(e) => updateActiveEditingFile({ paperSize: e.target.value })}
+                        className="text-[14px] text-slate-700 bg-transparent text-right outline-none cursor-pointer font-medium"
+                      >
+                        {Object.entries(priceCfg.paperSizes || DEFAULT_PRICE_CONFIG.paperSizes || {})
+                          .filter(([_, opt]) => opt.enabled !== false)
+                          .map(([key, opt]) => (
+                            <option key={key} value={key}>
+                              {opt.name} {opt.extra > 0 ? `(+₹${opt.extra})` : ''}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+
+                    {/* Paper Type */}
+                    <div className="flex items-center justify-between py-1 border-b border-slate-100">
+                      <span className="text-[14px] font-medium text-slate-900">Paper Type</span>
+                      <select
+                        value={activeEditingFile.paperType}
+                        onChange={(e) => updateActiveEditingFile({ paperType: e.target.value })}
+                        className="text-[14px] text-slate-700 bg-transparent text-right outline-none cursor-pointer font-medium"
+                      >
+                        {Object.entries(priceCfg.paperTypes || DEFAULT_PRICE_CONFIG.paperTypes || {})
+                          .filter(([_, opt]) => opt.enabled !== false)
+                          .map(([key, opt]) => (
+                            <option key={key} value={key}>
+                              {opt.name} {opt.extra > 0 ? `(+₹${opt.extra})` : ''}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+
+                    {/* Color Options */}
+                    <div className="flex items-center justify-between py-1 border-b border-slate-100">
+                      <span className="text-[14px] font-medium text-slate-900">Color Options</span>
+                      <select
+                        value={activeEditingFile.colorMode}
+                        onChange={(e) =>
+                          updateActiveEditingFile({ colorMode: e.target.value as 'bw' | 'color' })
+                        }
+                        className="text-[14px] text-slate-700 bg-transparent text-right outline-none cursor-pointer font-medium"
+                      >
+                        <option value="bw">Black & White (B&W)</option>
+                        <option value="color">Full Color</option>
+                      </select>
+                    </div>
+
+                    {/* Print Sides (Single / Duplex) - Immediate price recalculation */}
+                    <div className="flex items-center justify-between py-1 border-b border-slate-100">
+                      <span className="text-[14px] font-medium text-slate-900">Print Sides</span>
+                      <select
+                        value={activeEditingFile.sides}
+                        onChange={(e) =>
+                          updateActiveEditingFile({ sides: e.target.value as 'single' | 'duplex' })
+                        }
+                        className="text-[14px] text-slate-700 bg-transparent text-right outline-none cursor-pointer font-medium"
+                      >
+                        <option value="single">Single-Sided (1-Sided)</option>
+                        <option value="duplex">Double-Sided (2-Sided / Duplex)</option>
+                      </select>
+                    </div>
+
+                    {/* Quality */}
+                    <div className="flex items-center justify-between py-1 border-b border-slate-100">
+                      <span className="text-[14px] font-medium text-slate-900">Quality</span>
+                      <select
+                        value={activeEditingFile.quality}
+                        onChange={(e) => updateActiveEditingFile({ quality: e.target.value })}
+                        className="text-[14px] text-slate-700 bg-transparent text-right outline-none cursor-pointer font-medium"
+                      >
+                        {Object.entries(priceCfg.qualities || DEFAULT_PRICE_CONFIG.qualities || {})
+                          .filter(([_, opt]) => opt.enabled !== false)
+                          .map(([key, opt]) => (
+                            <option key={key} value={key}>
+                              {opt.name} {opt.extra > 0 ? `(+₹${opt.extra})` : ''}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+
+                    {/* Orientation */}
+                    <div className="flex items-center justify-between py-1 border-b border-slate-100">
+                      <span className="text-[14px] font-medium text-slate-900">Orientation</span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => updateActiveEditingFile({ orientation: 'portrait' })}
+                          className={`text-xs px-2.5 py-1 rounded font-semibold transition-all ${
+                            activeEditingFile.orientation === 'portrait'
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-slate-100 text-slate-600'
+                          }`}
+                        >
+                          Portrait
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => updateActiveEditingFile({ orientation: 'landscape' })}
+                          className={`text-xs px-2.5 py-1 rounded font-semibold transition-all ${
+                            activeEditingFile.orientation === 'landscape'
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-slate-100 text-slate-600'
+                          }`}
+                        >
+                          Landscape
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Page Range */}
+                    <div
+                      onClick={() => setShowPageRangeModal(true)}
+                      className="flex items-center justify-between py-1 border-b border-slate-100 cursor-pointer hover:bg-slate-50 px-1 -mx-1 rounded"
+                    >
+                      <span className="text-[14px] font-medium text-slate-900">Page Range</span>
+                      <div className="flex items-center gap-1 text-[14px] text-slate-700 font-medium">
+                        <span>
+                          {activeEditingFile.selectedPages.length === activeEditingFile.pages
+                            ? 'All Pages'
+                            : `${activeEditingFile.selectedPages.length} Selected`}
+                        </span>
+                        <ChevronRight className="w-4 h-4 text-slate-400" />
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {/* Copies Counter */}
                 <div className="flex items-center justify-between py-1 border-b border-slate-100">
                   <span className="text-[14px] font-medium text-slate-900">
                     Print ({activeEditingFile.copies}) Copy
@@ -842,11 +1300,11 @@ export default function KioskUploadPage() {
                           copies: Math.max(1, activeEditingFile.copies - 1),
                         })
                       }
-                      className="w-7 h-7 rounded-full border border-slate-300 flex items-center justify-center text-slate-600 hover:bg-slate-50"
+                      className="w-7 h-7 rounded-full border border-slate-300 flex items-center justify-center text-slate-600 hover:bg-slate-50 active:scale-95"
                     >
                       <Minus className="w-3.5 h-3.5" />
                     </button>
-                    <span className="w-4 text-center font-bold text-[14px]">
+                    <span className="w-4 text-center font-bold text-[14px] font-mono">
                       {activeEditingFile.copies}
                     </span>
                     <button
@@ -856,72 +1314,11 @@ export default function KioskUploadPage() {
                           copies: Math.min(50, activeEditingFile.copies + 1),
                         })
                       }
-                      className="w-7 h-7 rounded-full border border-blue-600 text-blue-600 flex items-center justify-center hover:bg-blue-50"
+                      className="w-7 h-7 rounded-full border border-blue-600 text-blue-600 flex items-center justify-center hover:bg-blue-50 active:scale-95"
                     >
                       <Plus className="w-3.5 h-3.5" />
                     </button>
                   </div>
-                </div>
-
-                {/* 4. Print Quality */}
-                <div className="flex items-center justify-between py-1 border-b border-slate-100">
-                  <span className="text-[14px] font-medium text-slate-900">Print Quality</span>
-                  <select
-                    value={activeEditingFile.quality}
-                    onChange={(e) =>
-                      updateActiveEditingFile({ quality: e.target.value as 'normal' | 'high' })
-                    }
-                    className="text-[14px] text-slate-600 bg-transparent text-right outline-none cursor-pointer"
-                  >
-                    <option value="normal">Normal</option>
-                    <option value="high">High (Photo Grade)</option>
-                  </select>
-                </div>
-
-                {/* 5. Page Range (Click opens Visual Selector) */}
-                <div
-                  onClick={() => setShowPageRangeModal(true)}
-                  className="flex items-center justify-between py-1 border-b border-slate-100 cursor-pointer hover:bg-slate-50 px-1 -mx-1 rounded"
-                >
-                  <span className="text-[14px] font-medium text-slate-900">Page Range</span>
-                  <div className="flex items-center gap-1 text-[14px] text-slate-600">
-                    <span>
-                      {activeEditingFile.selectedPages.length === activeEditingFile.pages
-                        ? 'All'
-                        : `${activeEditingFile.selectedPages.length} Pages`}
-                    </span>
-                    <ChevronRight className="w-4 h-4 text-slate-400" />
-                  </div>
-                </div>
-
-                {/* 6. Print Sides (Single / Duplex) */}
-                <div className="flex items-center justify-between py-1 border-b border-slate-100">
-                  <span className="text-[14px] font-medium text-slate-900">Print Sides</span>
-                  <select
-                    value={activeEditingFile.sides}
-                    onChange={(e) =>
-                      updateActiveEditingFile({ sides: e.target.value as 'single' | 'duplex' })
-                    }
-                    className="text-[14px] text-slate-600 bg-transparent text-right outline-none cursor-pointer"
-                  >
-                    <option value="single">Single-Sided (1-Sided)</option>
-                    <option value="duplex">Double-Sided (2-Sided)</option>
-                  </select>
-                </div>
-
-                {/* 7. Color Options */}
-                <div className="flex items-center justify-between py-1 border-b border-slate-100">
-                  <span className="text-[14px] font-medium text-slate-900">Color Options</span>
-                  <select
-                    value={activeEditingFile.colorMode}
-                    onChange={(e) =>
-                      updateActiveEditingFile({ colorMode: e.target.value as 'bw' | 'color' })
-                    }
-                    className="text-[14px] text-slate-600 bg-transparent text-right outline-none cursor-pointer"
-                  >
-                    <option value="bw">Black & White</option>
-                    <option value="color">Color</option>
-                  </select>
                 </div>
 
                 {/* Done Button */}
@@ -935,9 +1332,7 @@ export default function KioskUploadPage() {
               </div>
             </div>
 
-            {/* ========================================================================= */}
-            {/* VISUAL PAGE RANGE MODAL (Screenshot 4) */}
-            {/* ========================================================================= */}
+            {/* Visual Page Range Selector Modal */}
             {showPageRangeModal && (
               <div className="absolute inset-0 z-60 bg-white flex flex-col animate-in slide-in-from-right duration-200">
                 <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-100">
@@ -948,7 +1343,7 @@ export default function KioskUploadPage() {
                   >
                     <ChevronLeft className="w-6 h-6 text-slate-800" />
                   </button>
-                  <h3 className="text-[18px] font-semibold text-slate-900">page range</h3>
+                  <h3 className="text-[18px] font-semibold text-slate-900">Select Page Range</h3>
                 </div>
 
                 <div className="flex-1 p-6 overflow-y-auto">
@@ -964,7 +1359,7 @@ export default function KioskUploadPage() {
                               let next: number[];
                               if (isChecked) {
                                 next = activeEditingFile.selectedPages.filter((p) => p !== pageNum);
-                                if (next.length === 0) next = [pageNum]; // keep at least 1 page
+                                if (next.length === 0) next = [pageNum];
                               } else {
                                 next = [...activeEditingFile.selectedPages, pageNum].sort(
                                   (a, b) => a - b
@@ -975,15 +1370,12 @@ export default function KioskUploadPage() {
                             className="flex flex-col items-center gap-2 cursor-pointer group"
                           >
                             <div className="w-[120px] h-[160px] bg-white rounded-lg border-2 border-slate-200 relative shadow-sm overflow-hidden flex flex-col p-2 group-hover:border-blue-500">
-                              {/* Page Preview lines */}
                               <div className="w-full h-2 bg-slate-300 rounded mb-1" />
                               <div className="w-3/4 h-1.5 bg-slate-200 rounded mb-1" />
                               <div className="w-full h-1.5 bg-slate-100 rounded mb-1" />
                               <div className="w-5/6 h-1.5 bg-slate-100 rounded mb-1" />
                               <div className="w-full h-1.5 bg-slate-100 rounded mb-1" />
-                              <div className="w-2/3 h-1.5 bg-slate-100 rounded mb-1" />
 
-                              {/* Circular Blue Checkmark Badge */}
                               <div
                                 className={`absolute bottom-2 right-2 w-6 h-6 rounded-full flex items-center justify-center transition-all ${
                                   isChecked ? 'bg-[#0070F3] text-white shadow' : 'border-2 border-slate-300 bg-white'
@@ -993,7 +1385,7 @@ export default function KioskUploadPage() {
                               </div>
                             </div>
                             <span className="text-[14px] font-semibold text-slate-800">
-                              {pageNum}
+                              Page {pageNum}
                             </span>
                           </div>
                         );

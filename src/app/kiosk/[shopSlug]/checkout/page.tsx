@@ -5,20 +5,35 @@ import { useParams, useRouter } from 'next/navigation';
 import {
   CreditCard,
   Banknote,
-  QrCode,
   ShieldCheck,
   Printer,
-  ChevronRight,
   ArrowRight,
-  Clock,
-  CheckCircle2,
   AlertCircle,
   FileText,
+  ChevronLeft,
+  CheckCircle2,
+  Layers,
+  Image as ImageIcon,
 } from 'lucide-react';
-import { HeaderBar } from '@/components/HeaderBar';
-import { TicketCard, TicketPerforation } from '@/components/TicketCard';
-import { StampBadge } from '@/components/StampBadge';
 import { Shop } from '@/types/database';
+import { calculatePrintPrice, DEFAULT_PRICE_CONFIG } from '@/lib/price-calculator';
+
+interface FileConfig {
+  name: string;
+  pages: number;
+  copies: number;
+  mode: 'document' | 'photo';
+  colorMode: 'bw' | 'color';
+  paperSize: string;
+  paperType: string;
+  quality: string;
+  sides: string;
+  photoSize?: string;
+  photoPaper?: string;
+  photoQuality?: string;
+  orientation: string;
+  price: number;
+}
 
 export default function KioskCheckoutPage() {
   const params = useParams();
@@ -33,6 +48,13 @@ export default function KioskCheckoutPage() {
   const [fileName, setFileName] = useState('Document.pdf');
   const [fileType, setFileType] = useState('application/pdf');
   const [paperSize, setPaperSize] = useState('a4');
+  const [paperType, setPaperType] = useState('plain');
+  const [quality, setQuality] = useState('normal');
+  const [photoSize, setPhotoSize] = useState('');
+  const [photoPaper, setPhotoPaper] = useState('');
+  const [photoQuality, setPhotoQuality] = useState('');
+  const [selectedPages, setSelectedPages] = useState<number[]>([]);
+  const [mode, setMode] = useState<'document' | 'photo'>('document');
   const [colorMode, setColorMode] = useState<'bw' | 'color'>('bw');
   const [copies, setCopies] = useState(1);
   const [duplex, setDuplex] = useState(false);
@@ -41,6 +63,8 @@ export default function KioskCheckoutPage() {
   const [orientation, setOrientation] = useState('portrait');
   const [pages, setPages] = useState(1);
   const [price, setPrice] = useState(2.0);
+  const [fileConfigs, setFileConfigs] = useState<FileConfig[]>([]);
+  const [filesCount, setFilesCount] = useState(1);
 
   // Payment method: 'online' | 'cash'
   const [paymentMode, setPaymentMode] = useState<'online' | 'cash'>('online');
@@ -50,18 +74,37 @@ export default function KioskCheckoutPage() {
     const storedName = sessionStorage.getItem('qp_file_name');
     const storedType = sessionStorage.getItem('qp_file_type');
     const storedPaper = sessionStorage.getItem('qp_paper_size');
+    const storedPaperType = sessionStorage.getItem('qp_paper_type');
+    const storedQuality = sessionStorage.getItem('qp_quality');
+    const storedPhotoSize = sessionStorage.getItem('qp_photo_size');
+    const storedPhotoPaper = sessionStorage.getItem('qp_photo_paper');
+    const storedPhotoQuality = sessionStorage.getItem('qp_photo_quality');
+    const storedSelectedPages = sessionStorage.getItem('qp_selected_pages');
+    const storedMode = sessionStorage.getItem('qp_mode');
     const storedColor = sessionStorage.getItem('qp_color_mode');
     const storedCopies = sessionStorage.getItem('qp_copies');
     const storedDuplex = sessionStorage.getItem('qp_duplex');
     const storedBinding = sessionStorage.getItem('qp_binding') === 'true';
     const storedStapling = sessionStorage.getItem('qp_stapling') === 'true';
     const storedOrientation = sessionStorage.getItem('qp_orientation');
-    const storedPages = sessionStorage.getItem('qp_pages');
+    // Support both qp_pages and qp_file_pages
+    const storedPages = sessionStorage.getItem('qp_pages') || sessionStorage.getItem('qp_file_pages');
     const storedPrice = sessionStorage.getItem('qp_price');
+    const storedFilesCount = sessionStorage.getItem('qp_files_count');
+    const storedFileConfigs = sessionStorage.getItem('qp_file_configs');
 
     if (storedName) setFileName(storedName);
     if (storedType) setFileType(storedType);
     if (storedPaper) setPaperSize(storedPaper);
+    if (storedPaperType) setPaperType(storedPaperType);
+    if (storedQuality) setQuality(storedQuality);
+    if (storedPhotoSize) setPhotoSize(storedPhotoSize);
+    if (storedPhotoPaper) setPhotoPaper(storedPhotoPaper);
+    if (storedPhotoQuality) setPhotoQuality(storedPhotoQuality);
+    if (storedMode === 'photo' || storedMode === 'document') setMode(storedMode);
+    if (storedSelectedPages) {
+      try { setSelectedPages(JSON.parse(storedSelectedPages)); } catch (e) {}
+    }
     if (storedColor) setColorMode(storedColor as any);
     if (storedCopies) setCopies(parseInt(storedCopies, 10) || 1);
     if (storedDuplex) setDuplex(storedDuplex === 'true');
@@ -70,6 +113,10 @@ export default function KioskCheckoutPage() {
     if (storedOrientation) setOrientation(storedOrientation);
     if (storedPages) setPages(parseInt(storedPages, 10) || 1);
     if (storedPrice) setPrice(parseFloat(storedPrice) || 2.0);
+    if (storedFilesCount) setFilesCount(parseInt(storedFilesCount, 10) || 1);
+    if (storedFileConfigs) {
+      try { setFileConfigs(JSON.parse(storedFileConfigs)); } catch (e) {}
+    }
 
     // 1. Immediately restore cached shop if available
     const cachedShop = sessionStorage.getItem('qp_shop_context');
@@ -182,6 +229,13 @@ export default function KioskCheckoutPage() {
       formData.append('pages', String(pages));
       formData.append('copies', String(copies));
       formData.append('paper_size', paperSize);
+      formData.append('paper_type', paperType);
+      formData.append('quality', quality);
+      formData.append('mode', mode);
+      formData.append('photo_size', photoSize);
+      formData.append('photo_paper', photoPaper);
+      formData.append('photo_quality', photoQuality);
+      formData.append('selected_pages', JSON.stringify(selectedPages));
       formData.append('color_mode', colorMode);
       formData.append('duplex', String(duplex));
       formData.append('binding', String(binding));
@@ -228,244 +282,274 @@ export default function KioskCheckoutPage() {
     }
   };
 
-  const impressions = pages * copies;
+  const priceCfg = shop?.price_config || DEFAULT_PRICE_CONFIG;
+
+  // Helper to get human-readable mode label
+  const getModeLabel = (cfg: FileConfig) => {
+    if (cfg.mode === 'photo') return 'Photo Print';
+    return cfg.colorMode === 'color' ? 'Color' : 'B&W';
+  };
+
+  // Determine if it's a single-file order or multi-file
+  const hasMultipleFiles = fileConfigs.length > 1;
 
   return (
-    <div className="min-h-screen bg-[#fafaf7] flex flex-col justify-between pb-28">
-      <HeaderBar
-        shopName={shop?.name || 'QuickPrint Counter'}
-        counterInfo="Order Review"
-        backHref={`/kiosk/${shopSlug}/options`}
-      />
+    <div className="min-h-screen bg-[#FFFFFF] flex justify-center text-[#1E293B] antialiased">
+      <div className="w-full max-w-[440px] min-h-screen bg-[#FFFFFF] relative px-4 pt-4 pb-32 flex flex-col">
+        {/* HEADER */}
+        <header className="flex items-center justify-between pt-2 pb-4">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => router.push(`/kiosk/${shopSlug}`)}
+              className="w-9 h-9 rounded-full flex items-center justify-center bg-slate-100 hover:bg-slate-200 text-slate-700 transition-all"
+            >
+              <ChevronLeft className="w-5 h-5" />
+            </button>
+            <div>
+              <h1 className="text-[22px] font-normal leading-[1.1] text-black tracking-tight font-serif" style={{ fontFamily: "'Corben', serif" }}>
+                Gaur<span className="text-[#38BDF8]">print</span>
+              </h1>
+              <p className="text-[14px] text-slate-500 font-serif leading-none mt-1" style={{ fontFamily: "'Corben', serif" }}>
+                {shop?.name || 'Loading...'}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 px-3 py-1 bg-[#DCFCE7] border border-[#22C55E]/20 rounded-full">
+            <span className="w-2 h-2 rounded-full bg-[#16A34A] animate-pulse" />
+            <span className="text-[13px] font-bold text-[#15803D] tracking-wide" style={{ fontFamily: "'Inter', sans-serif" }}>Online</span>
+          </div>
+        </header>
 
-      <main className="max-w-xl mx-auto w-full px-4 pt-20 flex-1 flex flex-col gap-4">
-        {/* 3-Step Progress Indicator */}
-        <div className="w-full bg-[#f4f4f1] rounded-lg px-4 py-2.5 flex items-center justify-between border border-[#e6e5df]">
-          <div className="flex items-center gap-1.5 opacity-60">
-            <span className="w-5 h-5 rounded-full bg-[#e8e8e5] text-[#1c1b1f] font-mono text-center font-bold flex items-center justify-center text-[11px]">
-              ✓
-            </span>
-            <span className="text-[13px] text-[#1c1b1f]">Upload</span>
-          </div>
-          <ChevronRight className="w-3.5 h-3.5 text-[#a8a6a1]" />
-          <div className="flex items-center gap-1.5 opacity-60">
-            <span className="w-5 h-5 rounded-full bg-[#e8e8e5] text-[#1c1b1f] font-mono text-center font-bold flex items-center justify-center text-[11px]">
-              ✓
-            </span>
-            <span className="text-[13px] text-[#1c1b1f]">Options</span>
-          </div>
-          <ChevronRight className="w-3.5 h-3.5 text-[#a8a6a1]" />
+        {/* STEP INDICATOR */}
+        <div className="flex items-center gap-2 mb-5 px-1">
           <div className="flex items-center gap-1.5">
-            <span className="w-5 h-5 rounded-full bg-[#1c1b1f] text-white font-mono text-center font-bold flex items-center justify-center text-[11px]">
-              3
-            </span>
-            <span className="text-[13px] text-[#1c1b1f] font-bold">Pay & Collect</span>
+            <span className="w-5 h-5 rounded-full bg-[#E2E8F0] text-slate-500 font-bold flex items-center justify-center text-[10px]">✓</span>
+            <span className="text-[13px] text-slate-500" style={{ fontFamily: "'Inter', sans-serif" }}>Upload</span>
+          </div>
+          <div className="h-px flex-1 bg-slate-200" />
+          <div className="flex items-center gap-1.5">
+            <span className="w-5 h-5 rounded-full bg-[#E2E8F0] text-slate-500 font-bold flex items-center justify-center text-[10px]">✓</span>
+            <span className="text-[13px] text-slate-500" style={{ fontFamily: "'Inter', sans-serif" }}>Configure</span>
+          </div>
+          <div className="h-px flex-1 bg-[#2563EB]" />
+          <div className="flex items-center gap-1.5">
+            <span className="w-5 h-5 rounded-full bg-[#2563EB] text-white font-bold flex items-center justify-center text-[10px]">3</span>
+            <span className="text-[13px] font-bold text-[#2563EB]" style={{ fontFamily: "'Inter', sans-serif" }}>Pay & Print</span>
           </div>
         </div>
 
+        {/* ERROR */}
         {error && (
-          <div className="p-3 bg-[#ffdad6] border border-[#ba1a1a] rounded text-[#93000a] text-[13px] flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 shrink-0" />
+          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl text-red-800 text-[13px] flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0 text-red-600 mt-0.5" />
             <span>{error}</span>
           </div>
         )}
 
-        {/* Thermal Chit Receipt Card */}
-        <TicketCard>
-          <div className="p-4 bg-white">
-            <div className="flex items-start justify-between">
-              <div>
-                <span className="text-[11px] font-mono font-bold tracking-widest text-[#6b6966] uppercase">
-                  COUNTER CHIT SUMMARY
-                </span>
-                <h3 className="text-[16px] font-bold text-[#1c1b1f] mt-0.5">
-                  {shop?.name || 'Shree Ganesh Xerox'}
-                </h3>
-                <span className="text-[11px] font-mono text-[#6b6966]">
-                  Counter #04 • Instant Auto-Spool
-                </span>
+        {/* ORDER SUMMARY CARD */}
+        <section className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-[16px] p-4 mb-4">
+          <div className="flex items-center justify-between mb-3 pb-2.5 border-b border-[#E2E8F0]">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-[8px] bg-[#EFF6FF] flex items-center justify-center">
+                <Printer className="w-4 h-4 text-[#2563EB]" />
               </div>
-              <StampBadge status={paymentMode === 'online' ? 'PAID' : 'CASH'} />
-            </div>
-
-            {/* Itemized Parameters */}
-            <div className="mt-4 pt-3 border-t border-[#f4f4f1] space-y-2">
-              <div className="flex items-center justify-between text-[13px]">
-                <span className="text-[#6b6966] flex items-center gap-1.5">
-                  <FileText className="w-3.5 h-3.5" />
-                  <span className="truncate max-w-[200px]">{fileName}</span>
-                </span>
-                <span className="font-mono font-semibold text-[#1c1b1f]">
-                  {pages} {pages === 1 ? 'page' : 'pages'}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between text-[13px]">
-                <span className="text-[#6b6966]">Format & Color</span>
-                <span className="font-mono font-semibold text-[#1c1b1f]">
-                  {paperSize.toUpperCase()} • {colorMode === 'color' ? 'Full Color' : 'B&W'}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between text-[13px]">
-                <span className="text-[#6b6966]">Sets & Sides</span>
-                <span className="font-mono font-semibold text-[#1c1b1f]">
-                  {copies} {copies === 1 ? 'copy' : 'copies'} ({duplex ? 'Duplex 2-Sided' : 'Single-Sided'})
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between text-[13px]">
-                <span className="text-[#6b6966]">Finishing</span>
-                <span className="font-mono font-semibold text-[#1c1b1f]">
-                  {binding ? '🌀 Spiral Binding' : stapling ? '📎 Corner Staple' : 'Loose Sheets'}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between text-[13px]">
-                <span className="text-[#6b6966]">Total Impressions</span>
-                <span className="font-mono font-semibold text-[#1c1b1f]">
-                  {impressions} prints
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <TicketPerforation />
-
-          <div className="p-4 bg-[#f4f4f1] flex items-center justify-between border-t border-[#e6e5df]">
-            <div>
-              <span className="text-[10px] font-mono uppercase tracking-wider text-[#6b6966] font-bold">
-                PAYABLE AMOUNT
+              <span className="text-[14px] font-semibold text-[#1E293B]" style={{ fontFamily: "'Inter', sans-serif" }}>
+                Order Summary
               </span>
-              <div className="text-[24px] font-mono font-bold text-[#1c1b1f] leading-none mt-0.5">
-                ₹{price.toFixed(2)}
-              </div>
             </div>
-            <span className="text-[11px] font-mono text-[#1b7a4d] bg-[#e6f7ee] px-2 py-1 rounded font-semibold">
-              TAX INCLUDED
+            <span className="text-[12px] text-slate-500 font-mono">
+              {filesCount} {filesCount === 1 ? 'File' : 'Files'} · {pages} {pages === 1 ? 'Page' : 'Pages'}
             </span>
           </div>
-        </TicketCard>
 
-        {/* Pause Orders Alert */}
+          {/* Multi-file breakdown */}
+          {hasMultipleFiles && fileConfigs.length > 0 ? (
+            <div className="flex flex-col gap-2">
+              {fileConfigs.map((cfg, idx) => (
+                <div key={idx} className="flex items-center justify-between text-[13px] py-1">
+                  <div className="flex items-center gap-2 max-w-[240px]">
+                    <div className={`w-5 h-5 rounded flex items-center justify-center shrink-0 ${cfg.mode === 'photo' ? 'bg-purple-100 text-purple-600' : cfg.colorMode === 'color' ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-500'}`}>
+                      {cfg.mode === 'photo' ? <ImageIcon className="w-3 h-3" /> : <FileText className="w-3 h-3" />}
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-[#1E293B] truncate font-medium leading-tight" title={cfg.name}>{cfg.name}</span>
+                      <span className="text-[10px] text-slate-400 leading-none mt-0.5">
+                        {cfg.pages}pg · {cfg.copies}× · {getModeLabel(cfg)} · {(cfg.paperSize || cfg.photoSize || 'A4').toUpperCase()}
+                      </span>
+                    </div>
+                  </div>
+                  <span className="font-mono font-bold text-[#1E293B] shrink-0">₹{cfg.price.toFixed(0)}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            /* Single file summary */
+            <div className="flex flex-col gap-2 text-[13px]">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500">File</span>
+                <span className="font-medium text-[#1E293B] truncate max-w-[200px]">{fileName}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500">Format</span>
+                <span className="font-medium text-[#1E293B]">
+                  {mode === 'photo' ? `Photo · ${photoSize?.toUpperCase()}` : `${paperSize?.toUpperCase()} · ${colorMode === 'color' ? 'Color' : 'B&W'}`}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500">Sets & Sides</span>
+                <span className="font-medium text-[#1E293B]">
+                  {copies} {copies === 1 ? 'copy' : 'copies'} · {duplex ? 'Duplex 2-Sided' : 'Single-Sided'}
+                </span>
+              </div>
+              {(binding || stapling) && (
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">Finishing</span>
+                  <span className="font-medium text-[#1E293B]">
+                    {binding ? '🌀 Spiral Binding' : '📎 Corner Staple'}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Total */}
+          <div className="mt-3 pt-3 border-t border-[#E2E8F0] flex items-center justify-between">
+            <div className="flex flex-col">
+              <span className="text-[10px] text-slate-400 font-mono uppercase tracking-wider">PAYABLE AMOUNT</span>
+              <span className="text-[26px] font-bold font-mono text-[#1E293B] leading-none mt-0.5">₹{price.toFixed(2)}</span>
+            </div>
+            <div className="flex flex-col items-end gap-1">
+              <span className="text-[11px] font-semibold text-[#15803D] bg-[#DCFCE7] px-2 py-0.5 rounded-full">Tax Included</span>
+              {shop?.price_config?.taxPercentage ? (
+                <span className="text-[10px] text-slate-400">Incl. {shop.price_config.taxPercentage}% GST</span>
+              ) : null}
+            </div>
+          </div>
+        </section>
+
+        {/* ORDERS PAUSED ALERT */}
         {isOrdersPaused && (
-          <div className="p-4 bg-[#fff8e1] border border-[#f59e0b] rounded-lg text-[#92400e] text-[13px] flex items-start gap-3 shadow-xs">
-            <AlertCircle className="w-5 h-5 shrink-0 text-[#f59e0b] mt-0.5" />
-            <div className="flex flex-col">
-              <span className="font-bold text-[14px]">Counter Busy — Orders Temporarily Paused</span>
-              <span className="text-[12px] mt-0.5 leading-relaxed">
-                The shop operator is currently clearing queued jobs and has temporarily paused new orders. Please wait or check with the counter operator.
+          <div className="mb-4 p-3.5 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 shrink-0 text-amber-600 mt-0.5" />
+            <div>
+              <span className="text-[14px] font-bold text-amber-900 block">Counter Busy — Orders Paused</span>
+              <span className="text-[12px] text-amber-700 mt-0.5 leading-relaxed block">
+                The shop operator has temporarily paused new orders. Please wait or check with the counter operator.
               </span>
             </div>
           </div>
         )}
 
-        {/* No Payment Method Warning (Requirement 6) */}
+        {/* NO PAYMENT METHOD WARNING */}
         {!hasPaymentMethod && (
-          <div className="p-4 bg-[#ffdad6] border border-[#ba1a1a] rounded-lg text-[#93000a] text-[13px] flex items-start gap-3 shadow-xs">
-            <AlertCircle className="w-5 h-5 shrink-0 text-[#ba1a1a] mt-0.5" />
-            <div className="flex flex-col">
-              <span className="font-bold text-[14px]">Ordering Temporarily Unavailable</span>
-              <span className="text-[12px] mt-0.5 leading-relaxed">
-                No customer payment method is currently enabled for this shop. Please notify the shopkeeper at the counter to enable payment methods.
+          <div className="mb-4 p-3.5 bg-red-50 border border-red-200 rounded-xl flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 shrink-0 text-red-600 mt-0.5" />
+            <div>
+              <span className="text-[14px] font-bold text-red-900 block">Payments Unavailable</span>
+              <span className="text-[12px] text-red-700 mt-0.5 leading-relaxed block">
+                No payment method is currently enabled for this shop. Please ask the shopkeeper to enable payment methods.
               </span>
             </div>
           </div>
         )}
 
-        {/* Payment Method Selector (Only show enabled payment methods - Requirement 5) */}
+        {/* PAYMENT METHOD SELECTOR */}
         {hasPaymentMethod && (
-          <div className="flex flex-col gap-2.5">
-            <label className="text-[13px] font-mono uppercase tracking-wider font-bold text-[#1c1b1f] px-1">
-              SELECT PAYMENT METHOD
-            </label>
+          <section className="flex flex-col gap-3">
+            <h3 className="text-[13px] font-semibold text-slate-700 px-1" style={{ fontFamily: "'Inter', sans-serif" }}>
+              Select Payment Method
+            </h3>
 
-            {/* Option 1: Online Payment (Cashfree UPI / Cards) - only if enabled */}
+            {/* Online Payment */}
             {isUpiEnabled && (
               <button
                 type="button"
                 onClick={() => setPaymentMode('online')}
-                className={`p-4 rounded-lg border text-left flex items-start gap-3 transition-all ${
+                className={`w-full p-4 rounded-[16px] border-2 text-left flex items-center gap-4 transition-all ${
                   paymentMode === 'online'
-                    ? 'bg-white border-[#ff5a1f] ring-2 ring-[#ff5a1f]/20 shadow-xs'
-                    : 'bg-white border-[#e6e5df] hover:border-[#1c1b1f]'
+                    ? 'bg-[#EFF6FF] border-[#2563EB] shadow-sm'
+                    : 'bg-white border-[#E2E8F0] hover:border-slate-300'
                 }`}
               >
-                <div
-                  className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 mt-0.5 ${
-                    paymentMode === 'online'
-                      ? 'bg-[#ff5a1f] text-white'
-                      : 'bg-[#f4f4f1] text-[#1c1b1f]'
-                  }`}
-                >
+                <div className={`w-11 h-11 rounded-full flex items-center justify-center shrink-0 ${
+                  paymentMode === 'online' ? 'bg-[#2563EB] text-white' : 'bg-slate-100 text-slate-600'
+                }`}>
                   <CreditCard className="w-5 h-5" />
                 </div>
-
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between">
-                    <span className="text-[14px] font-bold text-[#1c1b1f]">
-                      Online UPI / Cashfree
+                    <span className="text-[15px] font-bold text-[#1E293B]" style={{ fontFamily: "'Inter', sans-serif" }}>
+                      Online UPI / Card
                     </span>
-                    <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-[#e6f7ee] text-[#0b4e2f]">
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-[#DCFCE7] text-[#15803D]">
                       FASTEST
                     </span>
                   </div>
-                  <p className="text-[12px] text-[#6b6966] mt-0.5">
-                    GPay, PhonePe, Paytm, Cards. Prints instantly without waiting.
+                  <p className="text-[12px] text-slate-500 mt-0.5">
+                    GPay, PhonePe, Paytm, Cards — Prints instantly
                   </p>
                 </div>
+                {paymentMode === 'online' && (
+                  <CheckCircle2 className="w-5 h-5 text-[#2563EB] shrink-0" />
+                )}
               </button>
             )}
 
-            {/* Option 2: Cash at Counter - only if enabled */}
+            {/* Cash at Counter */}
             {isCashEnabled && (
               <button
                 type="button"
                 onClick={() => setPaymentMode('cash')}
-                className={`p-4 rounded-lg border text-left flex items-start gap-3 transition-all ${
+                className={`w-full p-4 rounded-[16px] border-2 text-left flex items-center gap-4 transition-all ${
                   paymentMode === 'cash'
-                    ? 'bg-white border-[#1c1b1f] ring-2 ring-[#1c1b1f]/20 shadow-xs'
-                    : 'bg-white border-[#e6e5df] hover:border-[#1c1b1f]'
+                    ? 'bg-[#F8FAFC] border-[#334155] shadow-sm'
+                    : 'bg-white border-[#E2E8F0] hover:border-slate-300'
                 }`}
               >
-                <div
-                  className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 mt-0.5 ${
-                    paymentMode === 'cash'
-                      ? 'bg-[#1c1b1f] text-white'
-                      : 'bg-[#f4f4f1] text-[#1c1b1f]'
-                  }`}
-                >
+                <div className={`w-11 h-11 rounded-full flex items-center justify-center shrink-0 ${
+                  paymentMode === 'cash' ? 'bg-[#334155] text-white' : 'bg-slate-100 text-slate-600'
+                }`}>
                   <Banknote className="w-5 h-5" />
                 </div>
-
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between">
-                    <span className="text-[14px] font-bold text-[#1c1b1f]">
+                    <span className="text-[15px] font-bold text-[#1E293B]" style={{ fontFamily: "'Inter', sans-serif" }}>
                       Cash at Counter
                     </span>
-                    <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-[#e8e8e5] text-[#1c1b1f]">
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600">
                       COUNTER
                     </span>
                   </div>
-                  <p className="text-[12px] text-[#6b6966] mt-0.5">
-                    Hand ₹{price.toFixed(2)} cash to shopkeeper. Token generates now;
-                    print starts upon confirmation.
+                  <p className="text-[12px] text-slate-500 mt-0.5">
+                    Hand ₹{price.toFixed(2)} cash to shopkeeper · Token issued now
                   </p>
                 </div>
+                {paymentMode === 'cash' && (
+                  <CheckCircle2 className="w-5 h-5 text-[#334155] shrink-0" />
+                )}
               </button>
             )}
-          </div>
+          </section>
         )}
-      </main>
 
-      {/* Persistent Bottom Bar */}
-      <div className="fixed bottom-0 left-0 right-0 z-30 bg-[#fafaf7]/95 backdrop-blur-md border-t border-[#e6e5df] p-4 pb-safe shadow-lg">
-        <div className="max-w-xl mx-auto flex items-center justify-between gap-4">
+        {/* PRIVACY NOTE */}
+        <div className="mt-4 flex items-start gap-2.5 px-1">
+          <ShieldCheck className="w-4 h-5 text-[#006C4A] shrink-0 mt-0.5" />
+          <p className="text-[11px] text-[#434655] leading-normal" style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+            Files are encrypted during transfer and automatically deleted after printing. Your payment is handled securely.
+          </p>
+        </div>
+      </div>
+
+      {/* FIXED BOTTOM BAR */}
+      <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[440px] px-4 pb-5 pt-3 z-40 bg-white/95 backdrop-blur-md border-t border-[#E2E8F0]">
+        <div className="flex items-center justify-between gap-4">
           <div className="flex flex-col">
-            <span className="text-[11px] font-mono uppercase text-[#6b6966]">
-              {isOrdersPaused ? 'Intake Paused' : !hasPaymentMethod ? 'Unavailable' : paymentMode === 'online' ? 'Direct Spool' : 'Counter Cash'}
+            <span className="text-[11px] text-slate-400 font-mono uppercase tracking-wider">
+              {isOrdersPaused ? 'Paused' : !hasPaymentMethod ? 'Unavailable' : paymentMode === 'online' ? 'UPI / Online' : 'Cash Counter'}
             </span>
-            <span className="text-[20px] font-mono font-bold text-[#1c1b1f]">
+            <span className="text-[22px] font-bold font-mono text-[#1E293B] leading-none">
               ₹{price.toFixed(2)}
             </span>
           </div>
@@ -474,26 +558,35 @@ export default function KioskCheckoutPage() {
             type="button"
             disabled={loading || isOrdersPaused || !hasPaymentMethod}
             onClick={handlePlaceOrder}
-            className={`h-12 px-6 rounded text-white font-bold text-[14px] flex items-center gap-2 shadow-sm transition-all btn-tactile ${
+            className={`flex-1 h-[52px] rounded-[16px] text-white font-bold text-[15px] flex items-center justify-center gap-2 shadow-md transition-all active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed ${
               isOrdersPaused || !hasPaymentMethod
-                ? 'bg-[#94a3b8] cursor-not-allowed opacity-80'
+                ? 'bg-slate-400'
                 : paymentMode === 'online'
-                ? 'bg-[#ff5a1f] hover:bg-[#e04b14]'
-                : 'bg-[#1c1b1f] hover:bg-[#333]'
-            } ${loading ? 'opacity-60 cursor-not-allowed' : ''}`}
+                ? 'bg-[#2563EB] hover:bg-blue-700 shadow-[0px_8px_15px_-3px_rgba(37,99,235,0.3)]'
+                : 'bg-[#334155] hover:bg-slate-700 shadow-[0px_8px_15px_-3px_rgba(51,65,85,0.3)]'
+            }`}
+            style={{ fontFamily: "'ABeeZee', sans-serif" }}
           >
-            <span>
-              {loading
-                ? 'Submitting...'
-                : isOrdersPaused
-                ? 'Orders Paused'
-                : !hasPaymentMethod
-                ? 'Payments Disabled'
-                : paymentMode === 'online'
-                ? `Pay ₹${price.toFixed(2)} & Print`
-                : 'Get Token & Pay Cash'}
-            </span>
-            <ArrowRight className="w-4 h-4" />
+            {loading ? (
+              <>
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                <span>Submitting...</span>
+              </>
+            ) : isOrdersPaused ? (
+              'Orders Paused'
+            ) : !hasPaymentMethod ? (
+              'Payments Disabled'
+            ) : paymentMode === 'online' ? (
+              <>
+                <span>Pay ₹{price.toFixed(2)} & Print</span>
+                <ArrowRight className="w-4 h-4" />
+              </>
+            ) : (
+              <>
+                <span>Get Token & Pay Cash</span>
+                <ArrowRight className="w-4 h-4" />
+              </>
+            )}
           </button>
         </div>
       </div>

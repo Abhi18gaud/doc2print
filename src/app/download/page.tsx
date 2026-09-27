@@ -17,11 +17,35 @@ import {
 
 export default function DownloadPage() {
   const [downloading, setDownloading] = useState(false);
+  const [releaseInfo, setReleaseInfo] = useState<{
+    version: string;
+    tagName: string;
+    downloadUrl: string;
+    releaseDate?: string;
+    notes?: string;
+  }>({
+    version: '2.4.0',
+    tagName: 'v2.4.0',
+    downloadUrl: '/api/software/download?file=QuickPrint-Counter-OS-Setup.exe',
+  });
 
-  const triggerDownload = (filename: string) => {
+  React.useEffect(() => {
+    fetch('/api/releases/latest')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data && data.version) {
+          setReleaseInfo(data);
+        }
+      })
+      .catch((err) => console.warn('Could not load latest release metadata:', err));
+  }, []);
+
+  const triggerDownload = (filename?: string) => {
     setDownloading(true);
-    // Point to local or static installer route
-    window.location.href = `/api/software/download?file=${filename}`;
+    const targetUrl = filename
+      ? `/api/software/download?file=${encodeURIComponent(filename)}`
+      : releaseInfo.downloadUrl;
+    window.location.href = targetUrl;
     setTimeout(() => setDownloading(false), 3000);
   };
 
@@ -59,7 +83,7 @@ export default function DownloadPage() {
       <main className="max-w-4xl mx-auto px-4 sm:px-6 pt-12 pb-20 flex-1 flex flex-col gap-10">
         <div className="text-center">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#EFF6FF] border border-[#BFDBFE] text-[#2563EB] text-[12px] font-bold uppercase mb-4">
-            <span>OFFICIAL DESKTOP RELEASE v2.4</span>
+            <span>OFFICIAL DESKTOP RELEASE v{releaseInfo.version}</span>
           </div>
           <h1 className="text-[32px] sm:text-[44px] font-black text-[#0F172A] tracking-tight">
             Download QuickPrint Counter OS
@@ -82,29 +106,32 @@ export default function DownloadPage() {
                   QuickPrint for Windows
                 </h2>
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-[#059669] text-white">
-                  RECOMMENDED
+                  LATEST STABLE
                 </span>
               </div>
               <p className="text-[13px] text-[#64748B] mt-1">
-                Standard NSIS Installer • 64-bit Windows 10 / 11 • Version 2.4.0
+                Standard NSIS Installer • 64-bit Windows 10 / 11 • Version {releaseInfo.version}
+                {releaseInfo.releaseDate && (
+                  <span> • Released {new Date(releaseInfo.releaseDate).toLocaleDateString()}</span>
+                )}
               </p>
               <div className="flex items-center gap-4 text-[12px] text-[#059669] font-semibold mt-3">
                 <span className="flex items-center gap-1">
                   <CheckCircle2 className="w-4 h-4" /> Appears in Windows Installed Apps
                 </span>
                 <span className="flex items-center gap-1">
-                  <CheckCircle2 className="w-4 h-4" /> Start Menu & Desktop Shortcut
+                  <CheckCircle2 className="w-4 h-4" /> Built-in Safe Auto-Updater
                 </span>
               </div>
             </div>
           </div>
 
           <button
-            onClick={() => triggerDownload('QuickPrint-Counter-OS-Setup.exe')}
-            className="w-full md:w-auto h-13 px-8 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] active:scale-95 text-white font-bold text-[14px] flex items-center justify-center gap-2.5 shadow-md transition-all shrink-0"
+            onClick={() => triggerDownload()}
+            className="w-full md:w-auto h-13 px-8 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] active:scale-95 text-white font-bold text-[14px] flex items-center justify-center gap-2.5 shadow-md transition-all shrink-0 cursor-pointer"
           >
             <Download className="w-5 h-5" />
-            <span>{downloading ? 'Starting Download...' : 'Download Installer (.exe)'}</span>
+            <span>{downloading ? 'Starting Download...' : `Download v${releaseInfo.version} (.exe)`}</span>
           </button>
         </div>
 

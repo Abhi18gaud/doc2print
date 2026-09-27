@@ -6,7 +6,12 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "desktop:build": "npm --prefix desktop run build:win",
+    "release:patch": "npm --prefix desktop run release:patch",
+    "release:minor": "npm --prefix desktop run release:minor",
+    "release:major": "npm --prefix desktop run release:major",
+    "release:beta": "npm --prefix desktop run release:beta"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.116.0",
