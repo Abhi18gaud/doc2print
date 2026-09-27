@@ -1,3 +1,12 @@
+// Suppress @supabase/supabase-js Node.js version warning (uses console.warn, not process.emitWarning)
+// Electron v33 bundles Node.js v20.x which triggers this warning — we can't upgrade Electron's Node.
+const _origWarn = console.warn;
+console.warn = (...args) => {
+  const msg = typeof args[0] === 'string' ? args[0] : '';
+  if (msg.includes('Node.js 20 and below are deprecated') || msg.includes('supabase/discussions/45715')) return;
+  _origWarn.apply(console, args);
+};
+
 const { app, BrowserWindow, Tray, Menu, Notification, nativeImage, ipcMain, shell, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');

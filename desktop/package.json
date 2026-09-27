@@ -1,6 +1,6 @@
 {
   "name": "quickprint-desktop",
-  "version": "2.4.0",
+  "version": "2.4.1",
   "description": "QuickPrint Standalone Desktop Counter OS & Print Agent for Windows, macOS, and Linux",
   "main": "main.js",
   "scripts": {
