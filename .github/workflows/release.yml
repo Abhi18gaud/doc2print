@@ -33,20 +33,18 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
 
-      - name: Install Root Dependencies
-        run: npm ci
+      - name: Show version being released
+        working-directory: desktop
+        run: node -e "const p=require('./package.json'); console.log('Building version:', p.version)"
 
       - name: Install Desktop Dependencies
-        run: |
-          cd desktop
-          npm ci
+        working-directory: desktop
+        run: npm install --no-audit --no-fund
 
       - name: Build Windows Installer & Publish GitHub Release
+        working-directory: desktop
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
-        run: |
-          cd desktop
-          npx electron-builder --win --publish always
+        run: npx electron-builder --win --publish always
