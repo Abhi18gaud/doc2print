@@ -48,11 +48,12 @@ export async function GET() {
       const cleanVersion = tagName.replace(/^v/, '');
       const assets: ReleaseAsset[] = data.assets || [];
 
-      // Find Windows installer
-      const winInstaller = assets.find((a) => a.name.endsWith('.exe') && !a.name.includes('portable'))
-        || assets.find((a) => a.name.endsWith('.exe'));
+      // Find Windows installer (Standard Setup .exe)
+      const winInstaller = assets.find((a) => a.name.toLowerCase().includes('setup') && a.name.endsWith('.exe'))
+        || assets.find((a) => a.name.endsWith('.exe') && !a.name.toLowerCase().includes('portable'));
 
-      const winPortable = assets.find((a) => a.name.includes('portable') && (a.name.endsWith('.zip') || a.name.endsWith('.exe')));
+      // Find Windows portable (Standalone .exe)
+      const winPortable = assets.find((a) => a.name.toLowerCase().includes('portable') && (a.name.endsWith('.exe') || a.name.endsWith('.zip')));
       const macDmg = assets.find((a) => a.name.endsWith('.dmg'));
       const linuxAppImage = assets.find((a) => a.name.endsWith('.AppImage') || a.name.endsWith('.deb'));
 

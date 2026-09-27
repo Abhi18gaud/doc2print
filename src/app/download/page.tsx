@@ -23,9 +23,15 @@ export default function DownloadPage() {
     downloadUrl: string;
     releaseDate?: string;
     notes?: string;
+    assets?: {
+      installer?: { name: string; url: string; size: number } | null;
+      portable?: { name: string; url: string; size: number } | null;
+      mac?: { name: string; url: string } | null;
+      linux?: { name: string; url: string } | null;
+    } | null;
   }>({
-    version: '2.4.0',
-    tagName: 'v2.4.0',
+    version: '2.4.2',
+    tagName: 'v2.4.2',
     downloadUrl: '/api/software/download?file=QuickPrint-Counter-OS-Setup.exe',
   });
 
@@ -40,11 +46,16 @@ export default function DownloadPage() {
       .catch((err) => console.warn('Could not load latest release metadata:', err));
   }, []);
 
-  const triggerDownload = (filename?: string) => {
+  const triggerDownload = (type: 'installer' | 'portable' | string = 'installer') => {
     setDownloading(true);
-    const targetUrl = filename
-      ? `/api/software/download?file=${encodeURIComponent(filename)}`
-      : releaseInfo.downloadUrl;
+    let targetUrl = '';
+    if (type === 'installer') {
+      targetUrl = releaseInfo.assets?.installer?.url || releaseInfo.downloadUrl || '/api/software/download?file=setup';
+    } else if (type === 'portable') {
+      targetUrl = releaseInfo.assets?.portable?.url || '/api/software/download?file=portable';
+    } else {
+      targetUrl = `/api/software/download?file=${encodeURIComponent(type)}`;
+    }
     window.location.href = targetUrl;
     setTimeout(() => setDownloading(false), 3000);
   };
@@ -94,7 +105,7 @@ export default function DownloadPage() {
           </p>
         </div>
 
-        {/* PRIMARY WINDOWS DOWNLOAD CARD */}
+        {/* PRIMARY WINDOWS SETUP DOWNLOAD CARD */}
         <div className="bg-white border-2 border-[#2563EB] rounded-2xl p-8 shadow-md flex flex-col md:flex-row items-center justify-between gap-6">
           <div className="flex items-start gap-5">
             <div className="w-14 h-14 rounded-xl bg-[#EFF6FF] text-[#2563EB] flex items-center justify-center shrink-0">
@@ -103,62 +114,72 @@ export default function DownloadPage() {
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-[20px] font-extrabold text-[#0F172A]">
-                  QuickPrint for Windows
+                  QuickPrint Setup Installer (.exe)
                 </h2>
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-[#059669] text-white">
-                  LATEST STABLE
+                  RECOMMENDED
                 </span>
               </div>
               <p className="text-[13px] text-[#64748B] mt-1">
-                Standard NSIS Installer • 64-bit Windows 10 / 11 • Version {releaseInfo.version}
+                Standard Windows Setup Wizard • 64-bit Windows 10 / 11 • Version {releaseInfo.version} (91 MB)
                 {releaseInfo.releaseDate && (
                   <span> • Released {new Date(releaseInfo.releaseDate).toLocaleDateString()}</span>
                 )}
               </p>
-              <div className="flex items-center gap-4 text-[12px] text-[#059669] font-semibold mt-3">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] text-[#059669] font-semibold mt-3">
                 <span className="flex items-center gap-1">
-                  <CheckCircle2 className="w-4 h-4" /> Appears in Windows Installed Apps
+                  <CheckCircle2 className="w-4 h-4" /> Creates Desktop & Start Menu Shortcuts
                 </span>
                 <span className="flex items-center gap-1">
-                  <CheckCircle2 className="w-4 h-4" /> Built-in Safe Auto-Updater
+                  <CheckCircle2 className="w-4 h-4" /> Built-in Automatic Safe Updater
+                </span>
+                <span className="flex items-center gap-1">
+                  <CheckCircle2 className="w-4 h-4" /> Appears in Windows Installed Apps
                 </span>
               </div>
             </div>
           </div>
 
           <button
-            onClick={() => triggerDownload()}
+            onClick={() => triggerDownload('installer')}
             className="w-full md:w-auto h-13 px-8 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] active:scale-95 text-white font-bold text-[14px] flex items-center justify-center gap-2.5 shadow-md transition-all shrink-0 cursor-pointer"
           >
             <Download className="w-5 h-5" />
-            <span>{downloading ? 'Starting Download...' : `Download v${releaseInfo.version} (.exe)`}</span>
+            <span>{downloading ? 'Starting Download...' : `Download Setup Installer (.exe)`}</span>
           </button>
         </div>
 
-        {/* OTHER PLATFORMS */}
+        {/* OTHER EDITIONS */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="bg-white border border-[#E2E8F0] rounded-xl p-5 flex items-center justify-between shadow-xs">
             <div>
-              <h3 className="font-bold text-[15px] text-[#0F172A]">Portable Windows (.zip)</h3>
-              <p className="text-[12px] text-[#64748B]">Zero-install standalone executable</p>
+              <div className="flex items-center gap-2">
+                <h3 className="font-bold text-[15px] text-[#0F172A]">Portable Edition (.exe)</h3>
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-[#F1F5F9] text-[#475569] border border-[#E2E8F0]">
+                  STANDALONE
+                </span>
+              </div>
+              <p className="text-[12px] text-[#64748B] mt-1">
+                Zero-install single file (90 MB). Runs instantly from pen drive or folder.
+              </p>
             </div>
             <button
-              onClick={() => triggerDownload('quickprint-counter-os-portable.zip')}
-              className="h-9 px-4 rounded-md border border-[#CBD5E1] hover:bg-[#F8FAFC] text-[13px] font-bold text-[#0F172A] flex items-center gap-1.5"
+              onClick={() => triggerDownload('portable')}
+              className="h-9 px-4 rounded-md border border-[#CBD5E1] hover:bg-[#F8FAFC] text-[13px] font-bold text-[#0F172A] flex items-center gap-1.5 shrink-0 ml-4 cursor-pointer"
             >
               <Download className="w-4 h-4" />
-              <span>Download</span>
+              <span>Download (.exe)</span>
             </button>
           </div>
 
           <div className="bg-white border border-[#E2E8F0] rounded-xl p-5 flex items-center justify-between shadow-xs">
             <div>
               <h3 className="font-bold text-[15px] text-[#0F172A]">macOS & Linux</h3>
-              <p className="text-[12px] text-[#64748B]">Apple Silicon DMG & Linux AppImage</p>
+              <p className="text-[12px] text-[#64748B] mt-1">Apple Silicon DMG & Linux AppImage</p>
             </div>
             <button
               onClick={() => triggerDownload('QuickPrint-macOS-arm64.dmg')}
-              className="h-9 px-4 rounded-md border border-[#CBD5E1] hover:bg-[#F8FAFC] text-[13px] font-bold text-[#0F172A] flex items-center gap-1.5"
+              className="h-9 px-4 rounded-md border border-[#CBD5E1] hover:bg-[#F8FAFC] text-[13px] font-bold text-[#0F172A] flex items-center gap-1.5 shrink-0 ml-4 cursor-pointer"
             >
               <Download className="w-4 h-4" />
               <span>Download</span>
