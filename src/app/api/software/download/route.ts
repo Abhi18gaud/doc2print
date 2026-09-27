@@ -43,7 +43,46 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  // Authoritative fallback: Redirect to GitHub Releases latest download
-  const githubReleaseUrl = `https://github.com/Abhi18gaud/doc2print/releases/latest/download/${fileName}`;
+  // Authoritative dynamic lookup: Query GitHub API for the latest release asset
+  const repoOwner = 'Abhi18gaud';
+  const repoName = 'doc2print';
+  const isPortable = fileName.toLowerCase().includes('portable') || fileName.endsWith('.zip');
+
+  try {
+    const headers: Record<string, string> = {
+      'Accept': 'application/vnd.github.v3+json',
+      'User-Agent': 'QuickPrint-Download-Proxy',
+    };
+    if (process.env.GITHUB_TOKEN) {
+      headers['Authorization'] = `token ${process.env.GITHUB_TOKEN}`;
+    }
+
+    const res = await fetch(`https://api.github.com/repos/${repoOwner}/${repoName}/releases/latest`, {
+      headers,
+      next: { revalidate: 60 },
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      const assets = data.assets || [];
+
+      let matchedAsset = null;
+      if (isPortable) {
+        matchedAsset = assets.find((a: any) => a.name.toLowerCase().includes('portable'));
+      } else {
+        matchedAsset = assets.find((a: any) => a.name.endsWith('.exe') && !a.name.toLowerCase().includes('portable'))
+          || assets.find((a: any) => a.name.endsWith('.exe'));
+      }
+
+      if (matchedAsset && matchedAsset.browser_download_url) {
+        return NextResponse.redirect(matchedAsset.browser_download_url, { status: 302 });
+      }
+    }
+  } catch (err) {
+    console.warn('[DOWNLOAD_ROUTE] Could not fetch GitHub latest release assets:', err);
+  }
+
+  // If exact latest/download link: try direct URL
+  const githubReleaseUrl = `https://github.com/${repoOwner}/${repoName}/releases/latest/download/${fileName}`;
   return NextResponse.redirect(githubReleaseUrl, { status: 302 });
 }
