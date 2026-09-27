@@ -1,6 +1,6 @@
 {
   "name": "quickprint-desktop",
-  "version": "2.4.1",
+  "version": "2.4.2",
   "description": "QuickPrint Standalone Desktop Counter OS & Print Agent for Windows, macOS, and Linux",
   "main": "main.js",
   "scripts": {
@@ -47,7 +47,8 @@
         "provider": "github",
         "owner": "Abhi18gaud",
         "repo": "doc2print",
-        "private": false
+        "private": false,
+        "releaseType": "release"
       }
     ],
     "directories": {
@@ -79,6 +80,7 @@
       "icon": "assets/icon.png"
     },
     "nsis": {
+      "artifactName": "QuickPrint-Counter-OS-Setup-${version}.${ext}",
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
@@ -88,6 +90,9 @@
       "uninstallDisplayName": "QuickPrint Counter OS",
       "deleteAppDataOnUninstall": false,
       "runAfterFinish": true
+    },
+    "portable": {
+      "artifactName": "QuickPrint-Counter-OS-Portable-${version}.${ext}"
     },
     "mac": {
       "target": [
