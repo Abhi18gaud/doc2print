@@ -1122,7 +1122,17 @@
       const rawPaper = job.paper_size || 'A4';
       const isSpiral = job.binding || rawPaper.includes('Spiral');
       const isStapled = job.stapling || rawPaper.includes('Staple');
-      const basePaper = rawPaper.split(' + ')[0];
+      function getPaperDisplay(p) {
+        if (!p) return 'A4';
+        const clean = p.split(' + ')[0].trim().toLowerCase();
+        if (clean === 'a4') return 'A4';
+        if (clean === 'a3') return 'A3';
+        if (clean === 'legal') return 'Legal';
+        if (clean === 'passport') return 'Passport (8×)';
+        if (clean === 'custom') return 'Legal / Bond';
+        return p.toUpperCase();
+      }
+      const basePaper = getPaperDisplay(rawPaper);
       const amount = (job.total_amount || 0).toFixed(2);
       const isExpanded = expandedJobs.has(job.id);
 

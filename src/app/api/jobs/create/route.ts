@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase/client';
 import { createAdminClient } from '@/lib/supabase/server';
 import { calculatePrintPrice, DEFAULT_PRICE_CONFIG } from '@/lib/price-calculator';
+import { toCanonicalPaperSize } from '@/lib/paper-size';
 
 export async function POST(request: NextRequest) {
   try {
@@ -139,14 +140,11 @@ export async function POST(request: NextRequest) {
     // Never trust client price; always enforce server-calculated authoritative price
     const finalPrice = serverCalc.total;
 
-    let finalPaperSize = rawPaperSize.toUpperCase();
-    if (mode === 'photo') {
-      finalPaperSize = `Photo ${photoSize || '4x6'} (${photoPaper || 'Glossy'})`;
-    } else {
-      finalPaperSize = `${rawPaperSize.toUpperCase()} (${paperType})`;
-      if (binding) finalPaperSize += ' + Spiral Binding';
-      else if (stapling) finalPaperSize += ' + Corner Stapling';
-    }
+    // Enforce strict canonical database paper size satisfying jobs_paper_size_check
+    const finalPaperSize = toCanonicalPaperSize(
+      mode === 'photo' ? photoSize : rawPaperSize,
+      mode
+    );
 
     // 1. Upload file to Supabase Storage bucket 'print-files'
     const timestamp = Date.now();

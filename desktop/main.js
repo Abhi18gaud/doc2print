@@ -27,7 +27,17 @@ app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
 // Single instance lock to prevent multiple conflicting processes
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
-  app.quit();
+  console.log('[LIFECYCLE] Another instance of QuickPrint Counter OS is already running. Exiting secondary process.');
+  app.exit(0);
+} else {
+  app.on('second-instance', (_event, _commandLine, _workingDirectory) => {
+    console.log('[LIFECYCLE] User launched QuickPrint again. Restoring and focusing active Counter OS window.');
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      if (!mainWindow.isVisible()) mainWindow.show();
+      mainWindow.focus();
+    }
+  });
 }
 
 const { createClient } = require('@supabase/supabase-js');
@@ -346,13 +356,25 @@ function clearSavedSession() {
 }
 
 // Windows native printer discovery
-function getWindowsPrinters() {
-  return new Promise((resolve) => {
-    if (process.platform !== 'win32') {
-      return resolve(['Virtual Spooler']);
+async function getWindowsPrinters() {
+  if (process.platform !== 'win32') {
+    return ['Virtual Spooler'];
+  }
+  // Fast path: use Electron's native Windows spooler API (EnumPrintersW)
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents?.getPrintersAsync) {
+    try {
+      const printers = await mainWindow.webContents.getPrintersAsync();
+      if (printers && printers.length > 0) {
+        return printers.map((p) => p.name).filter(Boolean);
+      }
+    } catch (e) {
+      console.warn('[PRINTERS] Fast getPrintersAsync note:', e.message);
     }
+  }
+
+  return new Promise((resolve) => {
     const cmd = 'powershell -NoProfile -Command "Get-Printer | Select-Object -ExpandProperty Name"';
-    exec(cmd, (err, stdout) => {
+    exec(cmd, { timeout: 3000 }, (err, stdout) => {
       if (err || !stdout) {
         return resolve(['Microsoft Print to PDF']);
       }
@@ -366,13 +388,22 @@ function getWindowsPrinters() {
 }
 
 // Windows default printer discovery
-function getWindowsDefaultPrinter() {
+async function getWindowsDefaultPrinter() {
+  if (process.platform !== 'win32') {
+    return 'Virtual Spooler';
+  }
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents?.getPrintersAsync) {
+    try {
+      const printers = await mainWindow.webContents.getPrintersAsync();
+      const def = printers.find((p) => p.isDefault);
+      if (def?.name) return def.name;
+      if (printers[0]?.name) return printers[0].name;
+    } catch (e) {}
+  }
+
   return new Promise((resolve) => {
-    if (process.platform !== 'win32') {
-      return resolve('Virtual Spooler');
-    }
     const cmd = 'powershell -NoProfile -Command "(Get-CimInstance Win32_Printer | Where-Object Default | Select-Object -First 1).Name"';
-    exec(cmd, (err, stdout) => {
+    exec(cmd, { timeout: 2500 }, (err, stdout) => {
       const def = (stdout || '').trim();
       resolve(def || 'Microsoft Print to PDF');
     });
@@ -380,26 +411,42 @@ function getWindowsDefaultPrinter() {
 }
 
 const lastKnownPrinterHealth = {};
+const inFlightPrinterChecks = {};
 
 // Windows native printer health & availability check
 function getRealPrinterStatus(printerName) {
-  return new Promise((resolve) => {
+  if (!printerName) {
+    return Promise.resolve({
+      exists: false,
+      status: 'NOT_FOUND',
+      details: 'No printer specified',
+      isOnline: false,
+      jobCount: 0,
+    });
+  }
+
+  if (process.platform !== 'win32') {
+    return Promise.resolve({
+      exists: true,
+      status: 'READY',
+      details: 'Virtual Spooler Active',
+      isOnline: true,
+      jobCount: 0,
+    });
+  }
+
+  if (inFlightPrinterChecks[printerName]) {
+    return inFlightPrinterChecks[printerName];
+  }
+
+  const checkPromise = new Promise((resolve) => {
     const handleResult = (res) => {
+      delete inFlightPrinterChecks[printerName];
       if (printerName) {
         lastKnownPrinterHealth[printerName] = res;
       }
       resolve(res);
     };
-
-    if (process.platform !== 'win32') {
-      return handleResult({
-        exists: true,
-        status: 'READY',
-        details: 'Virtual Spooler Active',
-        isOnline: true,
-        jobCount: 0,
-      });
-    }
 
     const safeName = (printerName || '').replace(/'/g, "''");
     const script = `
@@ -523,18 +570,18 @@ function getRealPrinterStatus(printerName) {
           jobCount = $jCount;
         } | ConvertTo-Json -Compress
       } catch {
-        @{ exists = $true; status = 'READY'; details = 'Spooler active'; isOnline = $true; jobCount = 0 } | ConvertTo-Json -Compress
+        @{ exists = $false; status = 'OFFLINE'; details = 'Printer status error'; isOnline = $false; jobCount = 0 } | ConvertTo-Json -Compress
       }
     `;
 
     const encoded = Buffer.from(script, 'utf16le').toString('base64');
-    exec(`powershell -NoProfile -EncodedCommand ${encoded}`, (err, stdout) => {
+    exec(`powershell -NoProfile -EncodedCommand ${encoded}`, { timeout: 3500 }, (err, stdout) => {
       if (err || !stdout) {
         return handleResult({
-          exists: true,
-          status: 'READY',
-          details: 'Spooler active',
-          isOnline: true,
+          exists: false,
+          status: 'OFFLINE',
+          details: 'Printer disconnected or power off',
+          isOnline: false,
           jobCount: 0,
         });
       }
@@ -543,15 +590,18 @@ function getRealPrinterStatus(printerName) {
         handleResult(parsed);
       } catch (parseErr) {
         handleResult({
-          exists: true,
-          status: 'READY',
-          details: 'Fallback status',
-          isOnline: true,
+          exists: false,
+          status: 'UNKNOWN',
+          details: 'Printer status unverified',
+          isOnline: false,
           jobCount: 0,
         });
       }
     });
   });
+
+  inFlightPrinterChecks[printerName] = checkPromise;
+  return checkPromise;
 }
 
 // Hardware Printer Capability Auto-Detection (Windows PowerShell)
@@ -963,7 +1013,7 @@ function startPrinterMonitoring() {
         }
       }
     } catch (e) {}
-  }, 4000);
+  }, 12000);
 }
 
 function createWindow() {
@@ -993,32 +1043,28 @@ function createWindow() {
   const uiEntry = path.join(__dirname, 'ui', 'index.html');
   mainWindow.loadFile(uiEntry);
 
-  mainWindow.webContents.on('did-finish-load', async () => {
-    try {
-      const targetPrinter = appConfig.defaultPrinter || await getWindowsDefaultPrinter();
-      const health = await getRealPrinterStatus(targetPrinter);
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('printer-status-updated', {
-          printer: targetPrinter,
-          ...health,
-        });
-      }
-    } catch (e) {}
+  mainWindow.webContents.on('did-finish-load', () => {
+    setTimeout(async () => {
+      try {
+        const targetPrinter = appConfig.defaultPrinter || await getWindowsDefaultPrinter();
+        const health = await getRealPrinterStatus(targetPrinter);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('printer-status-updated', {
+            printer: targetPrinter,
+            ...health,
+          });
+        }
+      } catch (e) {}
+    }, 300);
   });
 
-  // Minimize to tray on close
-  mainWindow.on('close', (event) => {
-    if (!app.isQuitting) {
-      event.preventDefault();
-      mainWindow.hide();
-      if (Notification.isSupported()) {
-        new Notification({
-          title: 'QuickPrint Counter OS Running in Tray',
-          body: 'Your live counter spooler is active and receiving orders in the background.',
-        }).show();
-      }
-    }
-    return false;
+  // Proper window close handling: cleanly quit so process does not remain dangling
+  mainWindow.on('close', () => {
+    app.isQuitting = true;
+  });
+
+  mainWindow.on('closed', () => {
+    mainWindow = null;
   });
 }
 
@@ -1915,7 +1961,24 @@ function registerIpcHandlers() {
         }
       }
 
-      // Step 5: Mark print completed in database
+      if (!jobDone) {
+        console.warn(`[SPOOLER] Spool clearance timeout for Job ${jobId}. Printer has not confirmed completion.`);
+        await client.from('jobs').update({
+          print_status: 'waiting_for_printer',
+          failure_reason: 'Print spool confirmation timed out. Printer may be busy or disconnected.',
+        }).eq('id', jobId);
+
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('job-status-updated', {
+            jobId,
+            status: 'waiting_for_printer',
+            error: 'Hardware confirmation timed out',
+          });
+        }
+        return { success: false, error: 'Print spool confirmation timed out. Check printer paper and connection.' };
+      }
+
+      // Step 5: Mark print completed in database ONLY after verified physical spool clearance
       const completedAt = new Date().toISOString();
       await client
         .from('jobs')
@@ -2350,8 +2413,29 @@ app.whenReady().then(() => {
   });
 });
 
+app.on('before-quit', () => {
+  app.isQuitting = true;
+  if (printerMonitorTimer) {
+    clearInterval(printerMonitorTimer);
+    printerMonitorTimer = null;
+  }
+  const client = getSupabase();
+  if (realtimeChannel && client) {
+    try {
+      client.removeChannel(realtimeChannel);
+    } catch (e) {}
+    realtimeChannel = null;
+  }
+  if (tray && !tray.isDestroyed()) {
+    try {
+      tray.destroy();
+    } catch (e) {}
+    tray = null;
+  }
+});
+
 app.on('window-all-closed', () => {
-  if (process.platform === 'darwin') {
+  if (process.platform !== 'darwin') {
     app.quit();
   }
 });

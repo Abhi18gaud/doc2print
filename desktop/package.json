@@ -13,8 +13,7 @@
     "release:patch": "npm version patch && npm run build:win",
     "release:minor": "npm version minor && npm run build:win",
     "release:major": "npm version major && npm run build:win",
-    "release:beta": "npm version prerelease --preid=beta && npm run build:win",
-    "postinstall": "node scripts/patch-supabase-warning.js"
+    "release:beta": "npm version prerelease --preid=beta && npm run build:win"
   },
   "keywords": [
     "quickprint",
