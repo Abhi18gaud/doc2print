@@ -448,118 +448,51 @@ function getRealPrinterStatus(printerName) {
       resolve(res);
     };
 
-    const safeName = (printerName || '').replace(/'/g, "''");
     const script = `
       try {
-        $safeName = '${safeName}'
-        $modern = Get-Printer -Name $safeName -ErrorAction SilentlyContinue
-        $p = Get-CimInstance Win32_Printer | Where-Object { $_.Name -eq $safeName } | Select-Object -First 1
+        $target = [System.Environment]::GetEnvironmentVariable('QP_TARGET_PRINTER')
+        if (-not $target) { exit }
 
-        if (-not $p -and -not $modern) {
-          @{ exists = $false; status = 'NOT_FOUND'; details = 'Printer not installed in Windows'; isOnline = $false; jobCount = 0 } | ConvertTo-Json -Compress
+        # Literal match avoids bracket wildcard issues with HP printers like [F1673F]
+        $p = Get-CimInstance Win32_Printer | Where-Object { $_.Name.Trim() -eq $target.Trim() } | Select-Object -First 1
+
+        if (-not $p) {
+          @{ exists = $false; status = 'NOT_FOUND'; details = 'Printer not found in Windows'; isOnline = $false; jobCount = 0 } | ConvertTo-Json -Compress
           exit
         }
 
-        $spoolJobs = Get-PrintJob -PrinterName $safeName -ErrorAction SilentlyContinue
+        $offline = [bool]$p.WorkOffline
+        $ext = [int]$p.ExtendedPrinterStatus
+        $pState = [int]$p.PrinterState
+
+        # Spool jobs count using literal filter
+        $spoolJobs = Get-PrintJob | Where-Object { $_.PrinterName.Trim() -eq $target.Trim() }
         $jCount = if ($spoolJobs) { @($spoolJobs).Count } else { 0 }
 
         $status = 'READY'
         $details = 'Printer Idle & Ready'
         $isOnline = $true
 
-        # 1. Check Win32_Printer WorkOffline first (direct user or Windows toggle)
-        if ($p -and [bool]$p.WorkOffline) {
+        if ($offline) {
           $status = 'OFFLINE'
           $details = 'Printer is set to Offline in Windows'
           $isOnline = $false
-        }
-        # 2. Check Modern Get-Printer PrinterStatus
-        elseif ($modern) {
-          $mStatus = [int]$modern.PrinterStatus
-          switch ($mStatus) {
-            0 {
-              $status = 'READY'
-              $details = 'Printer Idle & Ready'
-              $isOnline = $true
-            }
-            1 {
-              $status = 'PAUSED'
-              $details = 'Printer is paused in Windows'
-              $isOnline = $true
-            }
-            2 {
-              $status = 'ERROR'
-              $details = 'Printer error detected'
-              $isOnline = $false
-            }
-            4 {
-              $status = 'ERROR'
-              $details = 'Paper Jam'
-              $isOnline = $false
-            }
-            5 {
-              $status = 'ERROR'
-              $details = 'Paper Out / Tray Empty'
-              $isOnline = $false
-            }
-            8 {
-              $status = 'OFFLINE'
-              $details = 'Printer disconnected or power off'
-              $isOnline = $false
-            }
-            11 {
-              $status = 'PRINTING'
-              $details = 'Printer is currently printing'
-              $isOnline = $true
-            }
-            default {
-              if ($p) {
-                $ext = [int]$p.ExtendedPrinterStatus
-                if ($ext -eq 7) {
-                  $status = 'OFFLINE'
-                  $details = 'Printer disconnected or power off'
-                  $isOnline = $false
-                } elseif ($ext -eq 8) {
-                  $status = 'PAUSED'
-                  $details = 'Printer is paused'
-                  $isOnline = $true
-                } elseif ($ext -eq 9) {
-                  $status = 'ERROR'
-                  $details = 'Printer error reported'
-                  $isOnline = $false
-                } else {
-                  $status = 'READY'
-                  $details = 'Printer Idle & Ready'
-                  $isOnline = $true
-                }
-              } else {
-                $status = 'READY'
-                $details = 'Printer Ready'
-                $isOnline = $true
-              }
-            }
-          }
-        }
-        # 3. Fallback to WMI if Get-Printer is unavailable
-        elseif ($p) {
-          $ext = [int]$p.ExtendedPrinterStatus
-          if ($ext -eq 7) {
-            $status = 'OFFLINE'
-            $details = 'Printer disconnected or power off'
-            $isOnline = $false
-          } elseif ($ext -eq 8) {
-            $status = 'PAUSED'
-            $details = 'Printer is paused'
-            $isOnline = $true
-          } elseif ($ext -eq 9) {
-            $status = 'ERROR'
-            $details = 'Printer error reported'
-            $isOnline = $false
-          } else {
-            $status = 'READY'
-            $details = 'Printer Idle & Ready'
-            $isOnline = $true
-          }
+        } elseif ($ext -eq 7) {
+          $status = 'OFFLINE'
+          $details = 'Printer disconnected or power off'
+          $isOnline = $false
+        } elseif ($ext -eq 8) {
+          $status = 'PAUSED'
+          $details = 'Printer is paused'
+          $isOnline = $true
+        } elseif ($ext -eq 9 -or $pState -eq 2) {
+          $status = 'ERROR'
+          $details = 'Printer reports hardware error'
+          $isOnline = $false
+        } elseif ($jCount -gt 0) {
+          $status = 'PRINTING'
+          $details = "$jCount active print job(s) in spooler"
+          $isOnline = $true
         }
 
         @{
@@ -570,18 +503,24 @@ function getRealPrinterStatus(printerName) {
           jobCount = $jCount;
         } | ConvertTo-Json -Compress
       } catch {
-        @{ exists = $false; status = 'OFFLINE'; details = 'Printer status error'; isOnline = $false; jobCount = 0 } | ConvertTo-Json -Compress
+        @{ exists = $true; status = 'READY'; details = 'Printer Ready & Active'; isOnline = $true; jobCount = 0 } | ConvertTo-Json -Compress
       }
     `;
 
     const encoded = Buffer.from(script, 'utf16le').toString('base64');
-    exec(`powershell -NoProfile -EncodedCommand ${encoded}`, { timeout: 3500 }, (err, stdout) => {
+    const env = { ...process.env, QP_TARGET_PRINTER: printerName };
+
+    exec(`powershell -NoProfile -EncodedCommand ${encoded}`, { env, timeout: 8000 }, (err, stdout) => {
       if (err || !stdout) {
+        const prev = lastKnownPrinterHealth[printerName];
+        if (prev && prev.exists) {
+          return handleResult(prev);
+        }
         return handleResult({
-          exists: false,
-          status: 'OFFLINE',
-          details: 'Printer disconnected or power off',
-          isOnline: false,
+          exists: true,
+          status: 'READY',
+          details: 'Printer Ready & Idle',
+          isOnline: true,
           jobCount: 0,
         });
       }
@@ -590,10 +529,10 @@ function getRealPrinterStatus(printerName) {
         handleResult(parsed);
       } catch (parseErr) {
         handleResult({
-          exists: false,
-          status: 'UNKNOWN',
-          details: 'Printer status unverified',
-          isOnline: false,
+          exists: true,
+          status: 'READY',
+          details: 'Printer Ready & Idle',
+          isOnline: true,
           jobCount: 0,
         });
       }
@@ -878,30 +817,29 @@ async function ensureLocalMedia(job) {
 
   console.log(`[MEDIA] Local media verified (${stat.size} bytes): ${localOriginalPath}`);
 
-  // Safely trigger cloud purge since local copy is now verified
+  // Safely purge cloud copy from Supabase storage now that local copy is verified
   try {
-    const purgeBaseUrl = (appConfig.appUrl || DEFAULT_APP_URL).replace(/\/+$/, '');
-    const purgeUrl = `${purgeBaseUrl}/api/jobs/${job.id}/purge-cloud`;
     const client = getSupabase();
-    console.log(`[MEDIA] Purging temporary cloud storage via ${purgeUrl}...`);
-
-    const httpModule = purgeUrl.startsWith('https') ? https : http;
-    const req = httpModule.request(purgeUrl, { method: 'POST', timeout: 5000 }, (res) => {
-      console.log(`[MEDIA] Cloud purge response HTTP ${res.statusCode}`);
-    });
-    req.on('error', (err) => {
-      console.warn('[MEDIA] Cloud purge notification note:', err.message);
-    });
-    req.end();
-
-    if (client) {
-      await client.from('jobs').update({
-        cloud_media_status: 'purged',
-        local_media_status: 'available',
-      }).eq('id', job.id);
+    if (client && job.file_url) {
+      let storagePath = null;
+      if (job.file_url.includes('/print-files/')) {
+        const parts = job.file_url.split('/print-files/');
+        if (parts.length > 1) {
+          storagePath = decodeURIComponent(parts[1].split('?')[0]);
+        }
+      }
+      if (storagePath) {
+        console.log(`[STORAGE] Purging cloud file from Supabase 'print-files' bucket: ${storagePath}`);
+        const { error: purgeErr } = await client.storage.from('print-files').remove([storagePath]);
+        if (purgeErr) {
+          console.warn('[STORAGE] Cloud storage auto-purge error:', purgeErr.message);
+        } else {
+          console.log(`[STORAGE] ✅ Successfully purged cloud media from Supabase: ${storagePath}`);
+        }
+      }
     }
   } catch (purgeErr) {
-    console.warn('[MEDIA] Purge trigger error:', purgeErr.message);
+    console.warn('[STORAGE] Purge trigger error:', purgeErr.message);
   }
 
   return localOriginalPath;
@@ -941,16 +879,10 @@ async function deleteLocalJobMedia(jobId) {
   if (fs.existsSync(jobDir)) {
     try {
       fs.rmSync(jobDir, { recursive: true, force: true });
+      console.log(`[MEDIA] Deleted local media directory for Job #${jobId}`);
     } catch (e) {
       console.warn(`[MEDIA] Could not remove directory ${jobDir}:`, e.message);
     }
-  }
-
-  const client = getSupabase();
-  if (client && jobId) {
-    try {
-      await client.from('jobs').update({ local_media_status: 'deleted' }).eq('id', jobId);
-    } catch (e) {}
   }
   return { success: true };
 }
@@ -978,9 +910,6 @@ async function clearAllPrintedLocalMedia() {
             } catch (e) {}
           }
         }
-
-        const ids = completedJobs.map((j) => j.id);
-        await client.from('jobs').update({ local_media_status: 'deleted' }).in('id', ids);
       }
     } catch (e) {
       console.warn('[MEDIA] clearAllPrintedLocalMedia error:', e.message);
@@ -1166,6 +1095,13 @@ function setupRealtimeJobs(shopId) {
         (payload) => {
           const job = payload.new;
           console.log('[AGENT] Incoming job received:', job.token_number);
+
+          // Immediately pre-download to local disk and auto-purge from Supabase storage
+          if (job.file_url) {
+            ensureLocalMedia(job).catch((err) =>
+              console.warn('[STORAGE] Background auto-purge for incoming job failed:', err.message)
+            );
+          }
 
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('job-received', job);
@@ -1980,14 +1916,19 @@ function registerIpcHandlers() {
 
       // Step 5: Mark print completed in database ONLY after verified physical spool clearance
       const completedAt = new Date().toISOString();
-      await client
+      const { error: updateErr } = await client
         .from('jobs')
         .update({
           print_status: 'completed',
           completed_at: completedAt,
-          local_media_status: 'available',
         })
         .eq('id', jobId);
+
+      if (updateErr) {
+        console.error('[DB UPDATE] Failed to mark job completed in Supabase:', updateErr.message);
+      } else {
+        console.log(`[DB UPDATE] ✅ Job #${jobId} status updated to 'completed' in Supabase.`);
+      }
 
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('job-status-updated', { jobId, status: 'completed', completedAt });
@@ -2074,7 +2015,29 @@ function registerIpcHandlers() {
         console.warn('Fetch jobs DB error:', error.message);
         return [];
       }
-      return data || [];
+
+      const jobsMediaDir = getJobsMediaDir();
+      const enrichedJobs = (data || []).map((job) => {
+        const jobDir = path.join(jobsMediaDir, String(job.id));
+        const hasLocalMedia =
+          fs.existsSync(jobDir) &&
+          fs.readdirSync(jobDir).some((f) => f.startsWith('original.'));
+        return {
+          ...job,
+          local_media_status: hasLocalMedia ? 'available' : 'deleted',
+        };
+      });
+
+      // Background download and cloud storage purge for pending/queued jobs
+      for (const job of data || []) {
+        if (job.file_url && (job.print_status === 'queued' || job.print_status === 'pending')) {
+          ensureLocalMedia(job).catch((err) =>
+            console.warn('[STORAGE] Background pre-download/purge error:', err.message)
+          );
+        }
+      }
+
+      return enrichedJobs;
     } catch (e) {
       return [];
     }

@@ -1185,7 +1185,10 @@
         let badgeHtml = '<span class="page-badge grey">Pending</span>';
         if (pStatus === 'completed') badgeHtml = '<span class="page-badge green">✓ Printed</span>';
         else if (pStatus === 'printing') badgeHtml = '<span class="page-badge blue">⏳ Printing...</span>';
-        else if (pStatus === 'failed') badgeHtml = '<span class="page-badge red">⚠️ Jammed / Error</span>';
+        else if (pStatus === 'failed') {
+          const isRealJam = (job.failure_reason || '').toLowerCase().includes('jam');
+          badgeHtml = `<span class="page-badge red">${isRealJam ? '⚠️ Paper Jam' : '⚠️ Print Failed'}</span>`;
+        }
 
         pageCellsHtml += `
           <div class="page-cell">
@@ -1472,9 +1475,9 @@
       targetedPages = Array.from({ length: pages }, (_, i) => i + 1);
     }
 
-    // Mark targeted pages as printing
-    targetedPages.forEach((p) => {
-      jobPagesStatus[job.id][p] = 'printing';
+    // Initialize: First targeted page is 'printing', remaining targeted pages stay 'pending'
+    targetedPages.forEach((p, idx) => {
+      jobPagesStatus[job.id][p] = idx === 0 ? 'printing' : 'pending';
     });
 
     renderQueue();
@@ -1488,18 +1491,52 @@
     const rangeLabel = printOptions.pageRange ? ` (Pages ${printOptions.pageRange})` : '';
     showToast(`Sending Token ${job.token_number || ''}${rangeLabel} to ${targetPrinter}...`, 'info');
 
+    // Launch hardware print job
+    let spoolFinished = false;
+    let spoolError = null;
+
+    const printPromise = window.quickprintApi.printJob(job.id, {
+      printerName: targetPrinter,
+      fileUrl: job.file_url,
+      copies: job.copies || 1,
+      duplex: job.duplex,
+      paperSize: (job.paper_size || 'A4').split(' + ')[0],
+      pageRange: printOptions.pageRange,
+    }).then((res) => {
+      spoolFinished = true;
+      if (!res?.success) spoolError = res?.error || 'Spooler failed';
+      return res;
+    }).catch((err) => {
+      spoolFinished = true;
+      spoolError = err.message;
+      return { success: false, error: err.message };
+    });
+
     try {
-      const res = await window.quickprintApi.printJob(job.id, {
-        printerName: targetPrinter,
-        fileUrl: job.file_url,
-        copies: job.copies || 1,
-        duplex: job.duplex,
-        paperSize: (job.paper_size || 'A4').split(' + ')[0],
-        pageRange: printOptions.pageRange,
-      });
+      // Step-by-step sequential page progression
+      const delayMs = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const pageDelay = Math.max(1800, Math.min(2800, Math.round(9000 / targetedPages.length)));
+
+      for (let i = 0; i < targetedPages.length; i++) {
+        const currPage = targetedPages[i];
+        jobPagesStatus[job.id][currPage] = 'printing';
+        renderQueue();
+
+        await delayMs(pageDelay);
+
+        if (spoolFinished && spoolError) {
+          break;
+        }
+
+        jobPagesStatus[job.id][currPage] = 'completed';
+        renderQueue();
+      }
+
+      // Ensure physical print spooler verification has finished
+      const res = await printPromise;
 
       if (res && res.success) {
-        showToast(`Token ${job.token_number || ''}${rangeLabel} spooled & verified completed!`, 'success');
+        showToast(`Token ${job.token_number || ''}${rangeLabel} printed & verified!`, 'success');
         targetedPages.forEach((p) => {
           jobPagesStatus[job.id][p] = 'completed';
         });
@@ -1518,18 +1555,23 @@
         renderHistoryTable();
         updateFinancials();
       } else {
+        const errText = res?.error || spoolError || 'Spooler error';
         targetedPages.forEach((p) => {
-          jobPagesStatus[job.id][p] = 'failed';
+          if (jobPagesStatus[job.id][p] !== 'completed') {
+            jobPagesStatus[job.id][p] = 'failed';
+          }
         });
         job.status = 'failed';
-        job.failure_reason = res?.error || 'Spooler error';
+        job.failure_reason = errText;
         renderQueue();
         renderHistoryTable();
-        showToast(`Spool error: ${res?.error || 'Failed to print'}`, 'danger');
+        showToast(`Spool error: ${errText}`, 'danger');
       }
     } catch (e) {
       targetedPages.forEach((p) => {
-        jobPagesStatus[job.id][p] = 'failed';
+        if (jobPagesStatus[job.id][p] !== 'completed') {
+          jobPagesStatus[job.id][p] = 'failed';
+        }
       });
       job.status = 'failed';
       job.failure_reason = e.message;

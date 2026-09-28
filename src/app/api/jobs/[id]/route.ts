@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase/client';
+import { createAdminClient } from '@/lib/supabase/server';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET(
   request: NextRequest,
@@ -7,8 +10,9 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
+    const client = createAdminClient() || supabase;
 
-    const { data: job, error } = await supabase
+    const { data: job, error } = await client
       .from('jobs')
       .select('*, shops(name, qr_code_slug, address)')
       .eq('id', id)
@@ -21,7 +25,7 @@ export async function GET(
     // Calculate position ahead: count jobs in 'queued' or 'printing' created before this job in the same shop
     let positionAhead = 0;
     if (job.print_status === 'queued' || job.print_status === 'printing') {
-      const { count } = await supabase
+      const { count } = await client
         .from('jobs')
         .select('*', { count: 'exact', head: true })
         .eq('shop_id', job.shop_id)
@@ -30,7 +34,7 @@ export async function GET(
 
       positionAhead = count || 0;
     } else if (job.print_status === 'pending_payment') {
-      const { count } = await supabase
+      const { count } = await client
         .from('jobs')
         .select('*', { count: 'exact', head: true })
         .eq('shop_id', job.shop_id)
@@ -39,10 +43,14 @@ export async function GET(
       positionAhead = count || 0;
     }
 
-    return NextResponse.json({
-      job,
-      positionAhead,
-    });
+    return NextResponse.json(
+      { job, positionAhead },
+      {
+        headers: {
+          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        },
+      }
+    );
   } catch (error) {
     console.error('Error fetching job details:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

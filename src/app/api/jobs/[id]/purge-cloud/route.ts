@@ -36,13 +36,7 @@ export async function POST(
       }
     }
 
-    // Update job record to reflect cloud media is purged
-    await client
-      .from('jobs')
-      .update({
-        cloud_media_status: 'deleted',
-      })
-      .eq('id', id);
+
 
     return NextResponse.json({
       success: true,

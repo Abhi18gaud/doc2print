@@ -73,6 +73,11 @@ export default function KioskLiveTokenPage() {
 
     fetchJob();
 
+    // Fast active polling fallback every 2 seconds to ensure web app syncs instantly
+    const pollInterval = setInterval(() => {
+      fetchJob();
+    }, 2000);
+
     // Set up Supabase Realtime channel subscription
     const channel = supabase
       .channel(`job_${jobId}`)
@@ -97,6 +102,7 @@ export default function KioskLiveTokenPage() {
       .subscribe();
 
     return () => {
+      clearInterval(pollInterval);
       supabase.removeChannel(channel);
     };
   }, [jobId, hasCelebrated]);
