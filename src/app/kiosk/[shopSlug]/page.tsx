@@ -34,6 +34,14 @@ import {
   removePersistedKioskFile,
   clearPersistedKioskFiles,
 } from '@/lib/kiosk-storage';
+import {
+  getPaperGeometry,
+  calculateContentPlacement,
+  calculateMultiPhotoLayout,
+  mmToPt,
+  NormalizedCrop,
+  ImageAdjustments,
+} from '@/lib/print-engine';
 
 export interface FileItem {
   id: string;
@@ -59,7 +67,14 @@ export interface FileItem {
   // Common attributes
   orientation: 'portrait' | 'landscape';
   copies: number;
-  fitMode?: 'fit' | 'fill' | 'actual';
+  fitMode?: 'fit' | 'fill' | 'actual' | 'custom';
+  alignment?: 'center' | 'top' | 'bottom' | 'left' | 'right';
+  customWidthMm?: number;
+  customHeightMm?: number;
+  borderless?: boolean;
+  marginMm?: number;
+  crop?: NormalizedCrop;
+  adjustments?: ImageAdjustments;
   pdfPageRotations?: Record<number, number>;
   // Print Studio attributes
   renderedDataUrl?: string;
@@ -348,88 +363,70 @@ export default function KioskUploadPage() {
               ? await masterPdf.embedPng(imageBytes)
               : await masterPdf.embedJpg(imageBytes);
 
-            // Determine page dimensions in PDF points (1 mm = 2.83465 pt)
-            // A4: 210 x 297 mm = 595.28 x 841.89 pt
-            // A3: 297 x 420 mm = 841.89 x 1190.55 pt
-            // Legal: 216 x 356 mm = 612.0 x 1008.0 pt
-            let pageWidth = 595.28;
-            let pageHeight = 841.89;
-            const paperLower = (item.paperSize || 'a4').toLowerCase();
-            if (paperLower === 'a3') {
-              pageWidth = 841.89;
-              pageHeight = 1190.55;
-            } else if (paperLower === 'legal') {
-              pageWidth = 612.0;
-              pageHeight = 1008.0;
-            }
+            // Authoritative paper geometry & printable area from print engine
+            const printableArea = getPaperGeometry(
+              item.paperSize || 'a4',
+              item.orientation || 'portrait',
+              item.borderless || false,
+              item.marginMm ?? 5
+            );
 
-            if (item.orientation === 'landscape') {
-              const tmp = pageWidth;
-              pageWidth = pageHeight;
-              pageHeight = tmp;
-            }
+            const pageWidthPt = mmToPt(printableArea.paperWidthMm);
+            const pageHeightPt = mmToPt(printableArea.paperHeightMm);
 
-            const page = masterPdf.addPage([pageWidth, pageHeight]);
+            const page = masterPdf.addPage([pageWidthPt, pageHeightPt]);
 
             // Layout based on print mode:
             if (item.mode === 'photo' && item.photoSize === 'passport') {
-              // Passport Multi-Photo Grid (35mm x 45mm = 99.2 pt x 127.5 pt)
-              const pw = 99.2;
-              const ph = 127.5;
-              const marginX = 40;
-              const marginY = 50;
-              const gapX = 14;
-              const gapY = 16;
-              const cols = 4;
+              // Passport Multi-Photo Grid (35mm x 45mm laid out mathematically on sheet)
               const count = Math.min(16, Math.max(1, item.copies || 8));
-
-              for (let c = 0; c < count; c++) {
-                const colIdx = c % cols;
-                const rowIdx = Math.floor(c / cols);
-                const x = marginX + colIdx * (pw + gapX);
-                const y = pageHeight - marginY - (rowIdx + 1) * ph - rowIdx * gapY;
-
+              const layout = calculateMultiPhotoLayout(printableArea, 'passport', count, 2);
+              for (const cell of layout.cells) {
                 page.drawImage(embeddedImage, {
-                  x,
-                  y,
-                  width: pw,
-                  height: ph,
+                  x: mmToPt(cell.xMm),
+                  y: pageHeightPt - mmToPt(cell.yMm + cell.heightMm),
+                  width: mmToPt(cell.widthMm),
+                  height: mmToPt(cell.heightMm),
                 });
               }
-            } else if (item.mode === 'photo' && item.photoSize !== 'a4_photo') {
-              // Standard photo (4x6, 5x7, 6x8) centered on sheet
-              let photoW = 288; // 4 in = 288 pt
-              let photoH = 432; // 6 in = 432 pt
-              if (item.photoSize === '5x7') {
-                photoW = 360;
-                photoH = 504;
-              } else if (item.photoSize === '6x8') {
-                photoW = 432;
-                photoH = 576;
-              }
-              if (item.orientation === 'landscape') {
-                const tmp = photoW;
-                photoW = photoH;
-                photoH = tmp;
-              }
+            } else if (item.mode === 'photo' && item.photoSize && item.photoSize !== 'a4_photo') {
+              // Dedicated photo size on sheet (4x6, 5x7, 6x8)
+              const placement = calculateContentPlacement({
+                sourceWidthPx: embeddedImage.width,
+                sourceHeightPx: embeddedImage.height,
+                printableArea,
+                fitMode: item.fitMode || 'fill',
+                alignment: item.alignment || 'center',
+                crop: item.crop,
+                targetPhotoSizeKey: item.photoSize,
+                mode: 'photo',
+              });
 
-              const x = (pageWidth - photoW) / 2;
-              const y = (pageHeight - photoH) / 2;
               page.drawImage(embeddedImage, {
-                x,
-                y,
-                width: photoW,
-                height: photoH,
+                x: mmToPt(placement.xMm),
+                y: pageHeightPt - mmToPt(placement.yMm + placement.heightMm),
+                width: mmToPt(placement.widthMm),
+                height: mmToPt(placement.heightMm),
               });
             } else {
-              // Full page image / A4 photo print
-              const margin = 36;
-              const dims = embeddedImage.scaleToFit(pageWidth - margin * 2, pageHeight - margin * 2);
+              // Image print or Full A4 Photo print
+              const placement = calculateContentPlacement({
+                sourceWidthPx: embeddedImage.width,
+                sourceHeightPx: embeddedImage.height,
+                printableArea,
+                fitMode: item.fitMode || 'fit',
+                alignment: item.alignment || 'center',
+                crop: item.crop,
+                customWidthMm: item.customWidthMm,
+                customHeightMm: item.customHeightMm,
+                mode: item.mode,
+              });
+
               page.drawImage(embeddedImage, {
-                x: margin + (pageWidth - margin * 2 - dims.width) / 2,
-                y: margin + (pageHeight - margin * 2 - dims.height) / 2,
-                width: dims.width,
-                height: dims.height,
+                x: mmToPt(placement.xMm),
+                y: pageHeightPt - mmToPt(placement.yMm + placement.heightMm),
+                width: mmToPt(placement.widthMm),
+                height: mmToPt(placement.heightMm),
               });
             }
           }

@@ -30,6 +30,14 @@ interface StoredFileRecord {
   photoQuality: string;
   orientation: 'portrait' | 'landscape';
   copies: number;
+  fitMode?: string;
+  alignment?: string;
+  customWidthMm?: number;
+  customHeightMm?: number;
+  borderless?: boolean;
+  marginMm?: number;
+  crop?: any;
+  adjustments?: any;
   renderedDataUrl?: string;
   editState?: any;
   pdfPageRotations?: Record<number, number>;
@@ -117,6 +125,14 @@ export async function persistKioskFiles(shopSlug: string, items: FileItem[]): Pr
         photoQuality: item.photoQuality,
         orientation: item.orientation,
         copies: item.copies,
+        fitMode: item.fitMode,
+        alignment: (item as any).alignment,
+        customWidthMm: (item as any).customWidthMm,
+        customHeightMm: (item as any).customHeightMm,
+        borderless: (item as any).borderless,
+        marginMm: (item as any).marginMm,
+        crop: (item as any).crop,
+        adjustments: (item as any).adjustments,
         renderedDataUrl: item.renderedDataUrl,
         editState: item.editState,
         pdfPageRotations: (item as any).pdfPageRotations,
@@ -192,6 +208,14 @@ export async function restoreKioskFiles(shopSlug: string): Promise<FileItem[]> {
         photoQuality: r.photoQuality || 'standard',
         orientation: r.orientation || 'portrait',
         copies: r.copies || 1,
+        fitMode: (r.fitMode as any) || 'fit',
+        alignment: (r.alignment as any) || 'center',
+        customWidthMm: r.customWidthMm,
+        customHeightMm: r.customHeightMm,
+        borderless: r.borderless ?? false,
+        marginMm: r.marginMm,
+        crop: r.crop,
+        adjustments: r.adjustments,
         renderedDataUrl: r.renderedDataUrl,
         editState: r.editState,
         ...((r as any).pdfPageRotations ? { pdfPageRotations: (r as any).pdfPageRotations } : {}),

@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import {
   Crop,
   RotateCw,
+  RotateCcw,
   FlipHorizontal,
   FlipVertical,
   ZoomIn,
@@ -12,7 +13,6 @@ import {
   Minimize2,
   Sliders,
   Check,
-  RotateCcw,
   Sun,
   Eye,
   Edit3,
@@ -30,35 +30,72 @@ import {
   ChevronLeft,
   ChevronRight,
   Maximize,
+  Undo2,
+  Redo2,
+  Lock,
+  Unlock,
+  Move,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  ArrowUp,
+  ArrowDown,
+  Sparkle,
+  Image as ImageIcon,
+  AlertTriangle,
 } from 'lucide-react';
 import { FileItem } from '@/app/kiosk/[shopSlug]/page';
 import { Shop, PriceConfig } from '@/types/database';
 import { calculatePrintPrice, DEFAULT_PRICE_CONFIG, PriceCalculationResult } from '@/lib/price-calculator';
-import { getPaperSizeDisplayName } from '@/lib/paper-size';
+import {
+  PrintableArea,
+  NormalizedCrop,
+  FitMode,
+  Alignment,
+  CropRatioPreset,
+  ImageAdjustments,
+  DEFAULT_ADJUSTMENTS,
+  DEFAULT_CROP,
+  getPaperGeometry,
+  calculateContentPlacement,
+  calculateMultiPhotoLayout,
+  getCropRatioFromPreset,
+  PAPER_DIMENSIONS_MM,
+  PHOTO_TARGET_SIZES_MM,
+  mmToPt,
+  ptToMm,
+} from '@/lib/print-engine';
 
 export interface ImageEditState {
-  crop?: { x: number; y: number; width: number; height: number }; // normalized 0..1
+  crop: NormalizedCrop;
   rotation: number; // 0, 90, 180, 270
   flipH: boolean;
   flipV: boolean;
   zoom: number; // 1.0 to 3.0
   panX: number; // in pixels
   panY: number; // in pixels
-  fitMode: 'fit' | 'fill' | 'actual';
-  brightness: number; // -50 to 50
-  contrast: number; // -50 to 50
+  fitMode: FitMode;
+  alignment: Alignment;
+  customWidthMm?: number;
+  customHeightMm?: number;
+  lockAspectRatio: boolean;
+  adjustments: ImageAdjustments;
+  cropPreset: CropRatioPreset;
 }
 
 export const DEFAULT_EDIT_STATE: ImageEditState = {
+  crop: DEFAULT_CROP,
   rotation: 0,
   flipH: false,
   flipV: false,
   zoom: 1.0,
   panX: 0,
   panY: 0,
-  fitMode: 'fill',
-  brightness: 0,
-  contrast: 0,
+  fitMode: 'fit',
+  alignment: 'center',
+  lockAspectRatio: true,
+  adjustments: DEFAULT_ADJUSTMENTS,
+  cropPreset: 'original',
 };
 
 interface PrintStudioProps {
@@ -84,18 +121,97 @@ export default function PrintStudio({
   const isPhotoMode = fileItem.mode === 'photo';
   const isImageMode = fileItem.mode === 'image';
 
-  // Tabs: 'preview' (Virtual Sheet Hero) or 'editor' (Active Crop & Tools / Document Preparation)
+  // Primary Workspace View: 'preview' (Virtual Sheet Hero) or 'editor' (Transform & Adjustments)
   const [activeTab, setActiveTab] = useState<'preview' | 'editor'>('preview');
-  const [showPriceBreakdown, setShowPriceBreakdown] = useState(false);
-  const [showFaceGuide, setShowFaceGuide] = useState(fileItem.photoSize === 'passport');
+
+  // Editor sub-tool: 'crop' | 'transform' | 'adjust'
+  const [editorSubTool, setEditorSubTool] = useState<'crop' | 'transform' | 'adjust'>('crop');
+
+  // Preview UI Scale (Screen zoom only, does NOT alter print scale)
+  const [previewZoom, setPreviewZoom] = useState<number>(1.0);
+
+  // Before / After comparison toggle
+  const [isComparingBefore, setIsComparingBefore] = useState<boolean>(false);
 
   // Multi-page Document preview page index
   const [activeDocPage, setActiveDocPage] = useState<number>(0);
 
-  // Edit Parameters
-  const [editState, setEditState] = useState<ImageEditState>(fileItem.editState || DEFAULT_EDIT_STATE);
+  // Price breakdown modal toggle
+  const [showPriceBreakdown, setShowPriceBreakdown] = useState<boolean>(false);
+
+  // Edit Parameters State
+  const initialEditState: ImageEditState = useMemo(() => {
+    return {
+      crop: fileItem.crop || fileItem.editState?.crop || DEFAULT_CROP,
+      rotation: fileItem.editState?.rotation ?? 0,
+      flipH: fileItem.editState?.flipH ?? false,
+      flipV: fileItem.editState?.flipV ?? false,
+      zoom: fileItem.editState?.zoom ?? 1.0,
+      panX: fileItem.editState?.panX ?? 0,
+      panY: fileItem.editState?.panY ?? 0,
+      fitMode: fileItem.fitMode || fileItem.editState?.fitMode || (isPhotoMode ? 'fill' : 'fit'),
+      alignment: fileItem.alignment || 'center',
+      customWidthMm: fileItem.customWidthMm,
+      customHeightMm: fileItem.customHeightMm,
+      lockAspectRatio: true,
+      adjustments: fileItem.adjustments || fileItem.editState?.adjustments || DEFAULT_ADJUSTMENTS,
+      cropPreset: isPhotoMode ? (fileItem.photoSize === 'passport' ? 'passport' : (fileItem.photoSize as CropRatioPreset) || '4:6') : 'original',
+    };
+  }, [fileItem, isPhotoMode]);
+
+  const [editState, setEditState] = useState<ImageEditState>(initialEditState);
+
+  // Undo / Redo History Stack
+  const [history, setHistory] = useState<ImageEditState[]>([initialEditState]);
+  const [historyIndex, setHistoryIndex] = useState<number>(0);
+
+  const pushHistory = useCallback((nextState: ImageEditState) => {
+    setHistory((prev) => {
+      const sliced = prev.slice(0, historyIndex + 1);
+      return [...sliced, nextState].slice(-20); // Keep last 20 states
+    });
+    setHistoryIndex((prev) => Math.min(19, prev + 1));
+  }, [historyIndex]);
+
+  const handleUndo = useCallback(() => {
+    if (historyIndex > 0) {
+      const target = history[historyIndex - 1];
+      setHistoryIndex(historyIndex - 1);
+      setEditState(target);
+    }
+  }, [history, historyIndex]);
+
+  const handleRedo = useCallback(() => {
+    if (historyIndex < history.length - 1) {
+      const target = history[historyIndex + 1];
+      setHistoryIndex(historyIndex + 1);
+      setEditState(target);
+    }
+  }, [history, historyIndex]);
+
+  // Keyboard Shortcuts for Undo / Redo
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+        if (e.shiftKey) {
+          e.preventDefault();
+          handleRedo();
+        } else {
+          e.preventDefault();
+          handleUndo();
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
+        e.preventDefault();
+        handleRedo();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleUndo, handleRedo]);
+
+  // Image Element & Natural Dimensions
   const [imageLoaded, setImageLoaded] = useState(false);
-  const [naturalSize, setNaturalSize] = useState<{ width: number; height: number }>({ width: 800, height: 600 });
+  const [naturalSize, setNaturalSize] = useState<{ width: number; height: number }>({ width: 1200, height: 800 });
   const [renderedPreviewUrl, setRenderedPreviewUrl] = useState<string>(fileItem.renderedDataUrl || fileItem.previewUrl);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -107,159 +223,67 @@ export default function PrintStudio({
     onUpdateRef.current = onUpdate;
   });
 
-  // Drag / Pan interaction state
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragStart, setDragStart] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-
-  // Load original image to get dimensions
+  // Load Source Image
   useEffect(() => {
     if (!fileItem.previewUrl || isDocument) return;
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
-      setNaturalSize({ width: img.naturalWidth || 800, height: img.naturalHeight || 600 });
+      setNaturalSize({ width: img.naturalWidth || 1200, height: img.naturalHeight || 800 });
       setImageLoaded(true);
     };
     img.src = fileItem.previewUrl;
     imgRef.current = img;
   }, [fileItem.previewUrl, isDocument]);
 
-  // Available photo size presets from shop's authoritative catalog
-  const availablePhotoSizes = useMemo(() => {
-    const map = priceCfg.photoSizes || DEFAULT_PRICE_CONFIG.photoSizes || {};
-    return Object.keys(map)
-      .filter((k) => map[k]?.enabled !== false)
-      .map((k) => ({
-        key: k,
-        name: map[k].name || k.toUpperCase(),
-        price: map[k].price || 15,
-        aspectRatio: map[k].aspectRatio || '4/6',
-      }));
-  }, [priceCfg]);
+  // Physical Paper Geometry & Printable Area (Engine-backed)
+  const printableArea: PrintableArea = useMemo(() => {
+    return getPaperGeometry(
+      fileItem.paperSize || 'a4',
+      fileItem.orientation || 'portrait',
+      fileItem.borderless || false,
+      fileItem.marginMm ?? 5
+    );
+  }, [fileItem.paperSize, fileItem.orientation, fileItem.borderless, fileItem.marginMm]);
 
-  // Available paper sizes from shop's authoritative catalog
-  const availablePaperSizes = useMemo(() => {
-    const map = priceCfg.paperSizes || DEFAULT_PRICE_CONFIG.paperSizes || {};
-    return Object.keys(map)
-      .filter((k) => map[k]?.enabled !== false)
-      .map((k) => ({
-        key: k,
-        name: map[k].name || k.toUpperCase(),
-        extra: map[k].extra || 0,
-        desc: map[k].description || '',
-      }));
-  }, [priceCfg]);
+  // Physical Content Placement & DPI (Engine-backed)
+  const placement = useMemo(() => {
+    return calculateContentPlacement({
+      sourceWidthPx: naturalSize.width,
+      sourceHeightPx: naturalSize.height,
+      printableArea,
+      fitMode: editState.fitMode,
+      alignment: editState.alignment,
+      crop: editState.crop,
+      rotation: editState.rotation,
+      flipH: editState.flipH,
+      flipV: editState.flipV,
+      userScale: editState.zoom,
+      userPanXMm: editState.panX * 0.2, // Convert drag px to mm
+      userPanYMm: editState.panY * 0.2,
+      customWidthMm: editState.customWidthMm,
+      customHeightMm: editState.customHeightMm,
+      targetPhotoSizeKey: fileItem.photoSize,
+      mode: fileItem.mode,
+    });
+  }, [naturalSize, printableArea, editState, fileItem.photoSize, fileItem.mode]);
 
-  // Paper Physical Dimensions in mm & Aspect Ratios
-  const paperPhysicalDimensions = useMemo(() => {
-    const size = (fileItem.paperSize || 'a4').toLowerCase();
-    const isLandscape = fileItem.orientation === 'landscape';
+  // Multi-Photo Sheet Layout (for Passport or Multi-copy 4x6 on A4)
+  const multiPhotoLayout = useMemo(() => {
+    if (!isPhotoMode) return null;
+    const isPassport = fileItem.photoSize === 'passport';
+    const copies = fileItem.copies || (isPassport ? 8 : 1);
+    if (!isPassport && fileItem.photoSize === 'a4_photo') return null;
 
-    let widthMm = 210;
-    let heightMm = 297;
-    let label = 'A4';
+    return calculateMultiPhotoLayout(
+      printableArea,
+      fileItem.photoSize || 'passport',
+      copies,
+      isPassport ? 2 : 4
+    );
+  }, [isPhotoMode, fileItem.photoSize, fileItem.copies, printableArea]);
 
-    if (size === 'a3') {
-      widthMm = 297;
-      heightMm = 420;
-      label = 'A3';
-    } else if (size === 'legal') {
-      widthMm = 216;
-      heightMm = 356;
-      label = 'Legal';
-    } else if (size === 'letter') {
-      widthMm = 216;
-      heightMm = 279;
-      label = 'Letter';
-    } else if (size === 'a5') {
-      widthMm = 148;
-      heightMm = 210;
-      label = 'A5';
-    }
-
-    if (isLandscape) {
-      return {
-        widthMm: heightMm,
-        heightMm: widthMm,
-        aspectRatio: heightMm / widthMm,
-        label: `${label} • Landscape`,
-        dimensionsText: `${heightMm} × ${widthMm} mm`,
-      };
-    }
-
-    return {
-      widthMm,
-      heightMm,
-      aspectRatio: widthMm / heightMm,
-      label: `${label} • Portrait`,
-      dimensionsText: `${widthMm} × ${heightMm} mm`,
-    };
-  }, [fileItem.paperSize, fileItem.orientation]);
-
-  // Photo Target Aspect Ratio
-  const targetPhotoRatio = useMemo(() => {
-    const photoKey = (fileItem.photoSize || '4x6').toLowerCase();
-    const isLandscape = fileItem.orientation === 'landscape';
-
-    if (photoKey === 'passport') {
-      return 35 / 45; // 0.7778
-    }
-    if (photoKey === '5x7') {
-      return isLandscape ? 7 / 5 : 5 / 7;
-    }
-    if (photoKey === '6x8') {
-      return isLandscape ? 8 / 6 : 6 / 8;
-    }
-    if (photoKey === 'a4_photo') {
-      return isLandscape ? 1.414 / 1 : 1 / 1.414;
-    }
-    // Default 4x6
-    return isLandscape ? 6 / 4 : 4 / 6;
-  }, [fileItem.photoSize, fileItem.orientation]);
-
-  // Photo Physical Dimensions in mm & formatted label
-  const photoPhysicalDimensions = useMemo(() => {
-    const photoKey = (fileItem.photoSize || '4x6').toLowerCase();
-    const isLandscape = fileItem.orientation === 'landscape';
-
-    let wMm = 102;
-    let hMm = 152;
-    let label = '4 × 6 in (102 × 152 mm)';
-
-    if (photoKey === 'passport') {
-      wMm = 35;
-      hMm = 45;
-      label = 'Passport (35 × 45 mm)';
-    } else if (photoKey === '5x7') {
-      wMm = 127;
-      hMm = 178;
-      label = '5 × 7 in (127 × 178 mm)';
-    } else if (photoKey === '6x8') {
-      wMm = 152;
-      hMm = 203;
-      label = '6 × 8 in (152 × 203 mm)';
-    } else if (photoKey === 'a4_photo') {
-      wMm = 210;
-      hMm = 297;
-      label = 'Full A4 Photo (210 × 297 mm)';
-    }
-
-    if (isLandscape && photoKey !== 'passport') {
-      return {
-        widthMm: hMm,
-        heightMm: wMm,
-        label,
-      };
-    }
-
-    return {
-      widthMm: wMm,
-      heightMm: hMm,
-      label,
-    };
-  }, [fileItem.photoSize, fileItem.orientation]);
-
-  // Calculate live authoritative price
+  // Authoritative Price Calculation
   const calculationResult: PriceCalculationResult = useMemo(() => {
     const pagesToPrint = fileItem.selectedPages?.length || fileItem.pages || 1;
     const effectiveMode = fileItem.mode === 'image' ? 'document' : fileItem.mode;
@@ -282,8 +306,8 @@ export default function PrintStudio({
     });
   }, [fileItem, priceCfg]);
 
-  // Render edited image onto canvas
-  const renderCanvas = useCallback(() => {
+  // Canvas Compositing Engine: Renders 300 DPI WYSIWYG Output
+  const renderCompositeCanvas = useCallback(() => {
     if (isDocument) return;
     const canvas = canvasRef.current;
     const img = imgRef.current;
@@ -292,72 +316,86 @@ export default function PrintStudio({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const targetW = 1200;
-    const targetH = Math.round(targetW / targetPhotoRatio);
-    canvas.width = targetW;
-    canvas.height = targetH;
+    // Use placement width & height converted to 300 DPI canvas pixels
+    const outputDpi = 300;
+    const canvasW = Math.max(200, Math.round((placement.widthMm / 25.4) * outputDpi));
+    const canvasH = Math.max(200, Math.round((placement.heightMm / 25.4) * outputDpi));
 
-    // Clear background
+    canvas.width = canvasW;
+    canvas.height = canvasH;
+
     ctx.fillStyle = '#FFFFFF';
-    ctx.fillRect(0, 0, targetW, targetH);
+    ctx.fillRect(0, 0, canvasW, canvasH);
 
     ctx.save();
 
     // 1. Move to center of canvas
-    ctx.translate(targetW / 2 + editState.panX * 2, targetH / 2 + editState.panY * 2);
+    ctx.translate(canvasW / 2, canvasH / 2);
 
-    // 2. Rotation & Flips
+    // 2. Rotate & Flip
     ctx.rotate((editState.rotation * Math.PI) / 180);
     ctx.scale(editState.flipH ? -1 : 1, editState.flipV ? -1 : 1);
 
-    // 3. Zoom
-    ctx.scale(editState.zoom, editState.zoom);
-
-    // 4. Filters (Brightness & Contrast)
-    ctx.filter = `brightness(${100 + editState.brightness}%) contrast(${100 + editState.contrast}%)`;
-
-    // 5. Draw Image centered
-    const imgW = img.naturalWidth || 800;
-    const imgH = img.naturalHeight || 600;
-
-    let drawW = targetW;
-    let drawH = targetH;
-
-    if (editState.fitMode === 'fit') {
-      const scale = Math.min(targetW / imgW, targetH / imgH);
-      drawW = imgW * scale;
-      drawH = imgH * scale;
-    } else if (editState.fitMode === 'actual') {
-      drawW = imgW;
-      drawH = imgH;
-    } else {
-      // Fill mode
-      const scale = Math.max(targetW / imgW, targetH / imgH);
-      drawW = imgW * scale;
-      drawH = imgH * scale;
+    // 3. Image Filters & Adjustments
+    const { brightness, contrast, saturation } = editState.adjustments;
+    let filterString = `brightness(${100 + brightness}%) contrast(${100 + contrast}%) saturate(${100 + saturation}%)`;
+    if (fileItem.colorMode === 'bw') {
+      filterString += ' grayscale(100%)';
     }
+    ctx.filter = filterString;
 
-    ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
+    // 4. Source Crop Region
+    const srcX = Math.round(naturalSize.width * editState.crop.x);
+    const srcY = Math.round(naturalSize.height * editState.crop.y);
+    const srcW = Math.round(naturalSize.width * editState.crop.width);
+    const srcH = Math.round(naturalSize.height * editState.crop.height);
+
+    // 5. Draw cropped source onto canvas
+    const drawW = editState.rotation % 180 !== 0 ? canvasH : canvasW;
+    const drawH = editState.rotation % 180 !== 0 ? canvasW : canvasH;
+
+    ctx.drawImage(
+      img,
+      srcX,
+      srcY,
+      srcW,
+      srcH,
+      -drawW / 2,
+      -drawH / 2,
+      drawW,
+      drawH
+    );
+
     ctx.restore();
 
-    // Export rendered dataURL for preview and checkout persistence
+    // Export rendered dataURL for preview & checkout persistence
     try {
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.94);
       setRenderedPreviewUrl(dataUrl);
       if (lastExportedUrlRef.current !== dataUrl) {
         lastExportedUrlRef.current = dataUrl;
-        onUpdateRef.current({ renderedDataUrl: dataUrl, editState });
+        onUpdateRef.current({
+          renderedDataUrl: dataUrl,
+          fitMode: editState.fitMode,
+          crop: editState.crop,
+          adjustments: editState.adjustments,
+          editState,
+        });
       }
     } catch (e) {
-      console.warn('Canvas export note:', e);
+      console.warn('Canvas export warning:', e);
     }
-  }, [imageLoaded, targetPhotoRatio, editState, isDocument]);
+  }, [imageLoaded, placement, editState, isDocument, fileItem.colorMode, naturalSize]);
 
   useEffect(() => {
-    renderCanvas();
-  }, [renderCanvas]);
+    renderCompositeCanvas();
+  }, [renderCompositeCanvas]);
 
-  // Touch / Mouse Pan Handling
+  // Drag / Pan & Pinch-to-Zoom Interaction State
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [initialPinchDist, setInitialPinchDist] = useState<number | null>(null);
+
   const handleMouseDown = (e: React.MouseEvent) => {
     setIsDragging(true);
     setDragStart({ x: e.clientX - editState.panX, y: e.clientY - editState.panY });
@@ -373,73 +411,170 @@ export default function PrintStudio({
   };
 
   const handleMouseUp = () => {
-    setIsDragging(false);
+    if (isDragging) {
+      setIsDragging(false);
+      pushHistory(editState);
+    }
   };
 
   const handleTouchStart = (e: React.TouchEvent) => {
     if (e.touches.length === 1) {
       setIsDragging(true);
       setDragStart({ x: e.touches[0].clientX - editState.panX, y: e.touches[0].clientY - editState.panY });
+    } else if (e.touches.length === 2) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      setInitialPinchDist(dist);
     }
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    if (!isDragging || e.touches.length !== 1) return;
-    setEditState((prev) => ({
-      ...prev,
-      panX: e.touches[0].clientX - dragStart.x,
-      panY: e.touches[0].clientY - dragStart.y,
-    }));
+    if (e.touches.length === 1 && isDragging) {
+      setEditState((prev) => ({
+        ...prev,
+        panX: e.touches[0].clientX - dragStart.x,
+        panY: e.touches[0].clientY - dragStart.y,
+      }));
+    } else if (e.touches.length === 2 && initialPinchDist !== null) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      const delta = (dist - initialPinchDist) * 0.005;
+      setEditState((prev) => ({
+        ...prev,
+        zoom: Math.min(3.0, Math.max(0.8, parseFloat((prev.zoom + delta).toFixed(2)))),
+      }));
+      setInitialPinchDist(dist);
+    }
   };
 
   const handleTouchEnd = () => {
     setIsDragging(false);
+    setInitialPinchDist(null);
+    pushHistory(editState);
   };
 
-  // Editor Actions
-  const rotateClockwise = () => {
-    setEditState((prev) => ({ ...prev, rotation: (prev.rotation + 90) % 360 }));
-  };
-
-  const toggleFlipH = () => {
-    setEditState((prev) => ({ ...prev, flipH: !prev.flipH }));
-  };
-
-  const toggleFlipV = () => {
-    setEditState((prev) => ({ ...prev, flipV: !prev.flipV }));
-  };
-
-  const setFitMode = (mode: 'fit' | 'fill' | 'actual') => {
-    setEditState((prev) => ({ ...prev, fitMode: mode, panX: 0, panY: 0, zoom: 1.0 }));
-    onUpdate({ fitMode: mode });
-  };
-
-  const handleZoom = (delta: number) => {
+  // Wheel Zoom on Desktop
+  const handleWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    const delta = e.deltaY < 0 ? 0.1 : -0.1;
     setEditState((prev) => ({
       ...prev,
-      zoom: Math.min(3.0, Math.max(1.0, parseFloat((prev.zoom + delta).toFixed(1)))),
+      zoom: Math.min(3.0, Math.max(0.8, parseFloat((prev.zoom + delta).toFixed(2)))),
     }));
   };
 
-  const handleReset = () => {
-    setEditState(DEFAULT_EDIT_STATE);
+  // Preset Ratio Applier
+  const applyCropRatioPreset = (preset: CropRatioPreset) => {
+    const sourceAspect = naturalSize.width / naturalSize.height;
+    const paperAspect = printableArea.paperWidthMm / printableArea.paperHeightMm;
+    const targetRatio = getCropRatioFromPreset(preset, sourceAspect, paperAspect);
+
+    if (targetRatio === null) {
+      // Free Crop: Reset to full bounds
+      const next = { ...editState, crop: DEFAULT_CROP, cropPreset: preset };
+      setEditState(next);
+      pushHistory(next);
+      return;
+    }
+
+    let newWidth = 1.0;
+    let newHeight = 1.0;
+
+    if (sourceAspect > targetRatio) {
+      // Source is wider than target ratio: crop horizontally
+      newWidth = targetRatio / sourceAspect;
+    } else {
+      // Source is taller than target ratio: crop vertically
+      newHeight = sourceAspect / targetRatio;
+    }
+
+    const newCrop: NormalizedCrop = {
+      x: (1 - newWidth) / 2,
+      y: (1 - newHeight) / 2,
+      width: newWidth,
+      height: newHeight,
+    };
+
+    const next = { ...editState, crop: newCrop, cropPreset: preset };
+    setEditState(next);
+    pushHistory(next);
   };
 
-  // Document Page Rotation & Page Range Management
-  const currentDocPageRotation = (fileItem.pdfPageRotations?.[activeDocPage + 1] || 0) % 360;
+  // Rotate & Flip Operations
+  const handleRotateQuarter = (direction: 'cw' | 'ccw') => {
+    const delta = direction === 'cw' ? 90 : -90;
+    const nextRot = (editState.rotation + delta + 360) % 360;
+    const next = { ...editState, rotation: nextRot };
+    setEditState(next);
+    pushHistory(next);
+  };
 
-  const rotateCurrentDocPage = () => {
+  const handleToggleFlip = (axis: 'h' | 'v') => {
+    const next = axis === 'h'
+      ? { ...editState, flipH: !editState.flipH }
+      : { ...editState, flipV: !editState.flipV };
+    setEditState(next);
+    pushHistory(next);
+  };
+
+  // Fit Mode Selectors
+  const handleSetFitMode = (mode: FitMode) => {
+    const next = { ...editState, fitMode: mode, panX: 0, panY: 0, zoom: 1.0 };
+    setEditState(next);
+    pushHistory(next);
+    onUpdate({ fitMode: mode });
+  };
+
+  // Alignment Selectors
+  const handleSetAlignment = (alignment: Alignment) => {
+    const next = { ...editState, alignment, panX: 0, panY: 0 };
+    setEditState(next);
+    pushHistory(next);
+  };
+
+  // Reset to Original State
+  const handleResetAllEdits = () => {
+    if (confirm('Reset all image edits and transforms back to original?')) {
+      setEditState(DEFAULT_EDIT_STATE);
+      pushHistory(DEFAULT_EDIT_STATE);
+    }
+  };
+
+  // Auto Enhance Feature
+  const handleAutoEnhance = () => {
+    const next = {
+      ...editState,
+      adjustments: {
+        ...editState.adjustments,
+        brightness: 6,
+        contrast: 12,
+        saturation: 10,
+        autoEnhance: true,
+      },
+    };
+    setEditState(next);
+    pushHistory(next);
+  };
+
+  // Document Page Actions
+  const currentDocRotation = (fileItem.pdfPageRotations?.[activeDocPage + 1] || 0) % 360;
+
+  const handleRotateCurrentDocPage = () => {
     const pageNum = activeDocPage + 1;
-    const newRot = (currentDocPageRotation + 90) % 360;
-    const updated = { ...(fileItem.pdfPageRotations || {}), [pageNum]: newRot };
+    const nextRot = (currentDocRotation + 90) % 360;
+    const updated = { ...(fileItem.pdfPageRotations || {}), [pageNum]: nextRot };
     onUpdate({ pdfPageRotations: updated });
   };
 
-  const togglePageSelection = (pageNum: number) => {
+  const handleTogglePageSelection = (pageNum: number) => {
     const current = fileItem.selectedPages || [];
     let updated: number[];
     if (current.includes(pageNum)) {
-      if (current.length === 1) return; // Must keep at least one page
+      if (current.length === 1) return; // Keep at least one page
       updated = current.filter((p) => p !== pageNum);
     } else {
       updated = [...current, pageNum].sort((a, b) => a - b);
@@ -447,23 +582,26 @@ export default function PrintStudio({
     onUpdate({ selectedPages: updated });
   };
 
-  const selectAllPages = () => {
-    const all = Array.from({ length: fileItem.pages || 1 }, (_, i) => i + 1);
-    onUpdate({ selectedPages: all });
-  };
+  // Dynamic Physical Labels
+  const paperLabel = useMemo(() => {
+    const p = PAPER_DIMENSIONS_MM[fileItem.paperSize?.toLowerCase() || 'a4'] || PAPER_DIMENSIONS_MM.a4;
+    return `${fileItem.paperSize?.toUpperCase() || 'A4'} • ${p.widthMm} × ${p.heightMm} mm`;
+  }, [fileItem.paperSize]);
 
-  const isPassportMode = isPhotoMode && fileItem.photoSize === 'passport';
+  const contentSizeLabel = useMemo(() => {
+    return `${Math.round(placement.widthMm)} × ${Math.round(placement.heightMm)} mm (${(placement.widthMm / 25.4).toFixed(1)} × ${(placement.heightMm / 25.4).toFixed(1)} in)`;
+  }, [placement]);
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col justify-end md:justify-center bg-black/75 backdrop-blur-sm animate-in fade-in duration-200">
-      {/* Hidden offscreen Canvas for high-res compositing */}
+    <div className="fixed inset-0 z-50 flex flex-col justify-end md:justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+      {/* Hidden high-res canvas for 300 DPI compositing */}
       <canvas ref={canvasRef} className="hidden" />
 
       {/* Main Print Studio Modal Card */}
-      <div className="w-full max-w-[460px] md:max-w-4xl mx-auto h-[100dvh] md:h-[90vh] bg-white rounded-t-[24px] md:rounded-[24px] overflow-hidden flex flex-col shadow-2xl animate-in slide-in-from-bottom md:zoom-in-95 duration-300">
+      <div className="w-full max-w-[480px] md:max-w-5xl mx-auto h-[100dvh] md:h-[92vh] bg-white rounded-t-[28px] md:rounded-[24px] overflow-hidden flex flex-col shadow-2xl animate-in slide-in-from-bottom md:zoom-in-95 duration-300">
         
         {/* ========================================================= */}
-        {/* TOP APP BAR: Professional, Balanced, Non-cramped */}
+        {/* TOP BAR: Clean, Balanced, Professional Print Studio Header */}
         {/* ========================================================= */}
         <header className="px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-white shrink-0 z-20">
           <div className="flex items-center gap-3">
@@ -477,10 +615,10 @@ export default function PrintStudio({
             </button>
             <div className="flex flex-col">
               <div className="flex items-center gap-2">
-                <h2 className="text-[17px] font-black tracking-tight text-slate-900 leading-none">
-                  Print <span className="text-blue-600">Studio</span>
+                <h2 className="text-[17px] font-black tracking-tight text-slate-900 leading-none font-serif" style={{ fontFamily: "'Corben', serif" }}>
+                  Gaur<span className="text-[#0284C7]">print</span> <span className="text-slate-600 font-sans text-[13px] font-bold">Studio</span>
                 </h2>
-                <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full uppercase tracking-wider bg-blue-50 text-blue-700 border border-blue-200">
+                <span className="text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider bg-blue-50 text-blue-700 border border-blue-200">
                   {isPhotoMode ? 'Photo Print' : isImageMode ? 'Image Print' : 'Document Prepare'}
                 </span>
               </div>
@@ -491,7 +629,7 @@ export default function PrintStudio({
           </div>
 
           <div className="flex items-center gap-2">
-            {/* View / Edit Tab Switcher */}
+            {/* View / Edit Mode Switcher */}
             <div className="flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200">
               <button
                 type="button"
@@ -528,7 +666,7 @@ export default function PrintStudio({
                     onRemove();
                   }
                 }}
-                className="w-9 h-9 rounded-full bg-red-50 hover:bg-red-100 text-red-600 flex items-center justify-center transition-colors"
+                className="w-9 h-9 rounded-full bg-red-50 hover:bg-red-100 active:scale-95 text-red-600 flex items-center justify-center transition-colors"
                 title="Remove this file"
               >
                 <Trash2 className="w-4 h-4" />
@@ -543,46 +681,60 @@ export default function PrintStudio({
         <div className="flex-1 overflow-y-auto md:grid md:grid-cols-12 flex flex-col min-h-0">
           
           {/* ========================================================= */}
-          {/* LEFT: HERO PREVIEW & QUICK ACTIONS */}
+          {/* LEFT: HERO PREVIEW & INTERACTIVE CANVAS */}
           {/* ========================================================= */}
-          <div className="md:col-span-7 bg-slate-50/80 border-b md:border-b-0 md:border-r border-slate-200 flex flex-col items-center justify-between p-3 sm:p-4 select-none shrink-0 min-h-[360px] md:min-h-full">
+          <div className="md:col-span-7 bg-slate-100/70 border-b md:border-b-0 md:border-r border-slate-200 flex flex-col items-center justify-between p-3 sm:p-4 select-none shrink-0 min-h-[400px] md:min-h-full">
             
-            {/* Top HUD: Physical Dimensions & Specs Badges */}
+            {/* Top HUD: Physical Sheet Info & Quality Indicator */}
             <div className="w-full flex items-center justify-between z-10 text-[11px] font-semibold text-slate-700 mb-2 gap-2 flex-wrap">
               <div className="flex items-center gap-1.5 bg-white/95 px-2.5 py-1 rounded-lg border border-slate-200 shadow-xs">
-                <span>📄 {paperPhysicalDimensions.label}</span>
+                <span>📄 {paperLabel}</span>
                 <span className="text-slate-300">•</span>
-                <span className="font-mono text-slate-500">{paperPhysicalDimensions.dimensionsText}</span>
+                <span className="text-slate-500 font-mono">{contentSizeLabel}</span>
               </div>
 
               <div className="flex items-center gap-1.5 bg-white/95 px-2.5 py-1 rounded-lg border border-slate-200 shadow-xs">
-                <span>{fileItem.colorMode === 'bw' ? '⚫ B&W' : '🎨 Color'}</span>
-                {isDocument && fileItem.sides === 'duplex' && (
-                  <>
-                    <span className="text-slate-300">•</span>
-                    <span className="text-amber-600 font-bold">2-Sided</span>
-                  </>
+                {/* DPI Quality Pill */}
+                {!isDocument && (
+                  <span
+                    className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                      placement.dpiRating === 'excellent'
+                        ? 'bg-emerald-50 text-emerald-700'
+                        : placement.dpiRating === 'good'
+                        ? 'bg-blue-50 text-blue-700'
+                        : 'bg-amber-50 text-amber-700'
+                    }`}
+                  >
+                    {placement.dpiRating === 'low' && <AlertTriangle className="w-3 h-3 text-amber-500" />}
+                    <span>{placement.effectiveDpi} DPI</span>
+                  </span>
                 )}
+                <span>{fileItem.colorMode === 'bw' ? '⚫ B&W' : '🎨 Color'}</span>
               </div>
             </div>
 
-            {/* PREVIEW CONTAINER */}
-            <div className="flex-1 w-full flex flex-col items-center justify-center p-2 relative">
-              
-              {/* TAB 1: REAL VIRTUAL SHEET PRINT PREVIEW */}
+            {/* HERO CANVAS CONTAINER */}
+            <div
+              className="flex-1 w-full flex flex-col items-center justify-center p-2 relative touch-none"
+              onWheel={activeTab === 'editor' ? handleWheel : undefined}
+            >
+              {/* TAB 1: REAL VIRTUAL PHYSICAL PAPER PREVIEW */}
               {activeTab === 'preview' && (
-                <div className="flex flex-col items-center justify-center w-full">
-                  {/* Virtual Paper Sheet */}
+                <div
+                  className="flex flex-col items-center justify-center w-full transition-transform duration-200"
+                  style={{ transform: `scale(${previewZoom})` }}
+                >
+                  {/* Virtual Paper Sheet with Physical Dimensions Ratio */}
                   <div
-                    className="bg-white rounded-lg shadow-[0_16px_40px_rgba(15,23,42,0.12),0_2px_6px_rgba(15,23,42,0.06)] border border-slate-200 relative overflow-hidden transition-all duration-300 flex items-center justify-center"
+                    className="bg-white rounded-lg shadow-[0_20px_45px_rgba(15,23,42,0.14),0_2px_8px_rgba(15,23,42,0.06)] border border-slate-300/80 relative overflow-hidden transition-all duration-300 flex items-center justify-center"
                     style={{
-                      width: fileItem.orientation === 'landscape' ? '300px' : '220px',
-                      height: fileItem.orientation === 'landscape' ? '220px' : '300px',
-                      padding: '10px',
+                      width: fileItem.orientation === 'landscape' ? '320px' : '230px',
+                      height: fileItem.orientation === 'landscape' ? '230px' : '320px',
+                      padding: `${(printableArea.marginMm.top / printableArea.paperHeightMm) * 100}%`,
                     }}
                   >
                     {/* Dotted Printable Area Safe Margin */}
-                    <div className="w-full h-full border border-dashed border-blue-300/80 rounded relative flex items-center justify-center overflow-hidden bg-slate-50/50">
+                    <div className="w-full h-full border border-dashed border-sky-300/80 rounded relative flex items-center justify-center overflow-hidden bg-slate-50/40">
                       
                       {/* CASE A: DOCUMENT / PDF PREVIEW */}
                       {isDocument ? (
@@ -590,7 +742,7 @@ export default function PrintStudio({
                           <div
                             className="w-full h-full relative overflow-hidden transition-transform duration-200"
                             style={{
-                              transform: `rotate(${currentDocPageRotation}deg)`,
+                              transform: `rotate(${currentDocRotation}deg)`,
                               filter: fileItem.colorMode === 'bw' ? 'grayscale(100%) contrast(105%)' : 'none',
                             }}
                           >
@@ -601,67 +753,64 @@ export default function PrintStudio({
                             />
                           </div>
                         ) : (
-                          // DOC / TXT
                           <div className="flex flex-col items-center justify-center text-blue-500 p-4 text-center">
                             <FileText className="w-12 h-12 mb-2 text-blue-500" />
                             <span className="text-[12px] font-bold text-slate-800 line-clamp-2">{fileItem.name}</span>
                             <span className="text-[10px] text-slate-400 mt-1">{fileItem.pages} Pages Document</span>
                           </div>
                         )
-                      ) : isPassportMode ? (
-                        /* CASE B: PASSPORT MULTI-PHOTO GRID */
-                        <div className="grid grid-cols-4 gap-1 p-1 w-full h-full items-center justify-center content-center">
-                          {Array.from({ length: Math.min(16, Math.max(1, fileItem.copies || 8)) }).map((_, idx) => (
+                      ) : multiPhotoLayout && multiPhotoLayout.photosPerSheet > 1 ? (
+                        /* CASE B: MULTI-PHOTO SHEET (Passport / 8x Grid) */
+                        <div
+                          className="w-full h-full grid gap-1 p-1 items-center justify-center content-center"
+                          style={{
+                            gridTemplateColumns: `repeat(${multiPhotoLayout.cols}, minmax(0, 1fr))`,
+                            gridTemplateRows: `repeat(${multiPhotoLayout.rows}, minmax(0, 1fr))`,
+                          }}
+                        >
+                          {multiPhotoLayout.cells.map((cell) => (
                             <div
-                              key={idx}
-                              className="aspect-[35/45] bg-slate-100 border border-slate-300 rounded-xs overflow-hidden relative shadow-2xs"
+                              key={cell.index}
+                              className="w-full h-full bg-slate-100 border border-slate-300 rounded-xs overflow-hidden relative shadow-2xs aspect-[35/45]"
                             >
                               <img
                                 src={renderedPreviewUrl}
-                                alt="Passport"
+                                alt="Grid Cell"
                                 className="w-full h-full object-cover"
                                 style={{
-                                  filter: fileItem.colorMode === 'bw' ? 'grayscale(100%) contrast(105%)' : 'none',
+                                  filter: fileItem.colorMode === 'bw' ? 'grayscale(100%)' : 'none',
                                 }}
                               />
                             </div>
                           ))}
                         </div>
                       ) : (
-                        /* CASE C: PHOTO / IMAGE ON SHEET */
+                        /* CASE C: SINGLE PHOTO / IMAGE ON SHEET */
                         <div
                           className="rounded overflow-hidden shadow-xs relative flex items-center justify-center bg-slate-100 transition-all duration-300"
                           style={{
-                            width:
-                              fileItem.photoSize === 'a4_photo' || fileItem.mode === 'image'
-                                ? '100%'
-                                : `${Math.min(94, Math.max(35, Math.round((photoPhysicalDimensions.widthMm / paperPhysicalDimensions.widthMm) * 100)))}%`,
-                            height:
-                              fileItem.photoSize === 'a4_photo' || fileItem.mode === 'image'
-                                ? '100%'
-                                : `${Math.min(94, Math.max(35, Math.round((photoPhysicalDimensions.heightMm / paperPhysicalDimensions.heightMm) * 100)))}%`,
-                            aspectRatio: targetPhotoRatio,
+                            width: `${Math.min(100, Math.max(20, (placement.widthMm / printableArea.printableWidthMm) * 100))}%`,
+                            height: `${Math.min(100, Math.max(20, (placement.heightMm / printableArea.printableHeightMm) * 100))}%`,
                           }}
                         >
                           <img
-                            src={renderedPreviewUrl}
+                            src={isComparingBefore ? fileItem.previewUrl : renderedPreviewUrl}
                             alt="Print Preview"
-                            className={`w-full h-full ${
-                              editState.fitMode === 'fit' ? 'object-contain' : 'object-cover'
-                            } transition-all`}
+                            className="w-full h-full object-cover transition-all"
                             style={{
-                              filter: fileItem.colorMode === 'bw' ? 'grayscale(100%) contrast(105%)' : 'none',
+                              filter: isComparingBefore
+                                ? 'none'
+                                : fileItem.colorMode === 'bw'
+                                ? 'grayscale(100%)'
+                                : 'none',
                             }}
                           />
-                          {isPhotoMode && fileItem.photoSize !== 'a4_photo' && (
-                            <div className="absolute inset-0 border border-slate-400/50 pointer-events-none" />
-                          )}
                         </div>
                       )}
                     </div>
                   </div>
 
-                  {/* Document Multi-Page Pager */}
+                  {/* Multi-page Pager for Documents */}
                   {isDocument && fileItem.pages > 1 && (
                     <div className="flex items-center gap-3 mt-3 bg-white px-3 py-1.5 rounded-full border border-slate-200 shadow-xs">
                       <button
@@ -686,34 +835,28 @@ export default function PrintStudio({
                     </div>
                   )}
 
-                  {/* Specs Subtext */}
-                  <div className="mt-2 text-center">
-                    <span className="text-[12px] font-bold text-slate-800">
-                      {isPhotoMode
-                        ? photoPhysicalDimensions.label
-                        : `${paperPhysicalDimensions.label} • ${paperPhysicalDimensions.dimensionsText}`}
-                    </span>
-                    <p className="text-[10.5px] text-slate-500">
-                      {isPassportMode
-                        ? `Arranges ${Math.min(16, fileItem.copies || 8)} photos with cut margins on ${paperPhysicalDimensions.label}`
-                        : `Printable safe zone included • Live scale representation`}
-                    </p>
-                  </div>
+                  {/* Quality Guidance Note */}
+                  {placement.dpiRating === 'low' && !isDocument && (
+                    <div className="mt-2.5 flex items-center gap-1.5 px-3 py-1 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-[11px] font-medium">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                      <span>Low resolution ({placement.effectiveDpi} DPI). Output may look soft or pixelated.</span>
+                    </div>
+                  )}
                 </div>
               )}
 
-              {/* TAB 2: ACTIVE EDITOR (IMAGE CROP / PAN OR DOCUMENT PREPARATION) */}
+              {/* TAB 2: INTERACTIVE TRANSFORM & CROP WORKSPACE */}
               {activeTab === 'editor' && (
                 <div className="flex flex-col items-center justify-center w-full">
                   {!isDocument ? (
-                    <>
-                      {/* Interactive Crop / Pan Viewport */}
+                    <div className="flex flex-col items-center w-full">
+                      {/* Interactive Workspace Frame */}
                       <div
-                        className="bg-slate-900 rounded-xl overflow-hidden relative cursor-grab active:cursor-grabbing shadow-inner flex items-center justify-center"
+                        className="bg-slate-900 rounded-2xl overflow-hidden relative cursor-grab active:cursor-grabbing shadow-2xl flex items-center justify-center touch-none select-none"
                         style={{
-                          width: '260px',
-                          height: '260px',
-                          aspectRatio: targetPhotoRatio,
+                          width: '280px',
+                          height: '280px',
+                          aspectRatio: '1/1',
                         }}
                         onMouseDown={handleMouseDown}
                         onMouseMove={handleMouseMove}
@@ -722,179 +865,159 @@ export default function PrintStudio({
                         onTouchMove={handleTouchMove}
                         onTouchEnd={handleTouchEnd}
                       >
+                        {/* Target Crop Boundary Overlay */}
+                        <div
+                          className="absolute border-2 border-cyan-400 bg-cyan-500/10 pointer-events-none z-10 shadow-[0_0_0_9999px_rgba(0,0,0,0.65)]"
+                          style={{
+                            width: `${editState.crop.width * 100}%`,
+                            height: `${editState.crop.height * 100}%`,
+                            left: `${editState.crop.x * 100}%`,
+                            top: `${editState.crop.y * 100}%`,
+                          }}
+                        >
+                          {/* Corner Handles */}
+                          <div className="absolute -top-1.5 -left-1.5 w-3 h-3 bg-white border-2 border-cyan-500 rounded-xs" />
+                          <div className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-white border-2 border-cyan-500 rounded-xs" />
+                          <div className="absolute -bottom-1.5 -left-1.5 w-3 h-3 bg-white border-2 border-cyan-500 rounded-xs" />
+                          <div className="absolute -bottom-1.5 -right-1.5 w-3 h-3 bg-white border-2 border-cyan-500 rounded-xs" />
+
+                          {/* Rule of Thirds Grid */}
+                          <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 pointer-events-none opacity-40">
+                            <div className="border-r border-b border-cyan-300" />
+                            <div className="border-r border-b border-cyan-300" />
+                            <div className="border-b border-cyan-300" />
+                            <div className="border-r border-b border-cyan-300" />
+                            <div className="border-r border-b border-cyan-300" />
+                            <div className="border-b border-cyan-300" />
+                            <div className="border-r border-cyan-300" />
+                            <div className="border-r border-cyan-300" />
+                            <div />
+                          </div>
+                        </div>
+
+                        {/* Transformed Image Underneath */}
                         <div
                           className="relative transition-transform duration-75 flex items-center justify-center w-full h-full"
                           style={{
                             transform: `translate(${editState.panX}px, ${editState.panY}px) rotate(${editState.rotation}deg) scale(${
                               (editState.flipH ? -1 : 1) * editState.zoom
                             }, ${(editState.flipV ? -1 : 1) * editState.zoom})`,
-                            filter: `brightness(${100 + editState.brightness}%) contrast(${100 + editState.contrast}%)`,
+                            filter: `brightness(${100 + editState.adjustments.brightness}%) contrast(${100 + editState.adjustments.contrast}%) saturate(${100 + editState.adjustments.saturation}%)`,
                           }}
                         >
                           <img
                             src={fileItem.previewUrl}
                             alt="Source"
-                            className={`pointer-events-none select-none ${
-                              editState.fitMode === 'fit' ? 'max-w-full max-h-full object-contain' : 'w-full h-full object-cover'
-                            }`}
+                            className="max-w-full max-h-full object-contain pointer-events-none"
                           />
                         </div>
 
-                        {/* Passport Guide Overlay */}
-                        {isPassportMode && showFaceGuide && (
-                          <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center border-2 border-cyan-400/80">
-                            <div className="w-24 h-32 border-2 border-dashed border-cyan-400 rounded-full flex items-center justify-center">
-                              <div className="w-14 h-0.5 bg-cyan-400/60" />
-                            </div>
-                            <span className="text-[9.5px] font-bold text-cyan-300 mt-1.5 bg-black/70 px-2 py-0.5 rounded">
-                              Align Face
-                            </span>
-                          </div>
-                        )}
-
-                        <div className="absolute bottom-2 right-2 px-2 py-0.5 rounded text-[10px] font-bold bg-black/70 text-white backdrop-blur-xs">
-                          Ratio {targetPhotoRatio.toFixed(2)}
+                        {/* Aspect Ratio Badge */}
+                        <div className="absolute bottom-2 right-2 px-2 py-0.5 rounded text-[10px] font-bold bg-black/80 text-white backdrop-blur-xs z-20">
+                          {editState.cropPreset.toUpperCase()} • {Math.round(editState.zoom * 100)}%
                         </div>
                       </div>
 
-                      {/* Photo Quick Actions Tool Strip */}
-                      <div className="flex items-center gap-1 mt-3 bg-white p-1 rounded-xl border border-slate-200 shadow-xs flex-wrap justify-center">
+                      {/* Tool Sub-Navigation Pill Strip */}
+                      <div className="flex items-center gap-1.5 mt-3 bg-white p-1 rounded-xl border border-slate-200 shadow-xs">
                         <button
                           type="button"
-                          onClick={rotateClockwise}
-                          className="p-2 rounded-lg hover:bg-slate-100 text-slate-700 active:scale-95"
-                          title="Rotate 90° Clockwise"
-                        >
-                          <RotateCw className="w-4 h-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={toggleFlipH}
-                          className={`p-2 rounded-lg transition-all ${
-                            editState.flipH ? 'bg-blue-100 text-blue-700' : 'hover:bg-slate-100 text-slate-700'
-                          }`}
-                          title="Flip Horizontal"
-                        >
-                          <FlipHorizontal className="w-4 h-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={toggleFlipV}
-                          className={`p-2 rounded-lg transition-all ${
-                            editState.flipV ? 'bg-blue-100 text-blue-700' : 'hover:bg-slate-100 text-slate-700'
-                          }`}
-                          title="Flip Vertical"
-                        >
-                          <FlipVertical className="w-4 h-4" />
-                        </button>
-                        <div className="w-px h-5 bg-slate-200 mx-1" />
-                        <button
-                          type="button"
-                          onClick={() => setFitMode('fit')}
-                          className={`px-2 py-1 rounded-lg text-[11px] font-bold transition-all ${
-                            editState.fitMode === 'fit' ? 'bg-blue-600 text-white' : 'hover:bg-slate-100 text-slate-700'
+                          onClick={() => setEditorSubTool('crop')}
+                          className={`px-3 py-1.5 rounded-lg text-[11.5px] font-bold flex items-center gap-1.5 transition-all ${
+                            editorSubTool === 'crop'
+                              ? 'bg-blue-600 text-white shadow-xs'
+                              : 'text-slate-700 hover:bg-slate-100'
                           }`}
                         >
-                          Fit
+                          <Crop className="w-3.5 h-3.5" />
+                          <span>Crop & Ratio</span>
                         </button>
                         <button
                           type="button"
-                          onClick={() => setFitMode('fill')}
-                          className={`px-2 py-1 rounded-lg text-[11px] font-bold transition-all ${
-                            editState.fitMode === 'fill' ? 'bg-blue-600 text-white' : 'hover:bg-slate-100 text-slate-700'
+                          onClick={() => setEditorSubTool('transform')}
+                          className={`px-3 py-1.5 rounded-lg text-[11.5px] font-bold flex items-center gap-1.5 transition-all ${
+                            editorSubTool === 'transform'
+                              ? 'bg-blue-600 text-white shadow-xs'
+                              : 'text-slate-700 hover:bg-slate-100'
                           }`}
                         >
-                          Fill
+                          <Move className="w-3.5 h-3.5" />
+                          <span>Resize & Move</span>
                         </button>
-                        <div className="w-px h-5 bg-slate-200 mx-1" />
                         <button
                           type="button"
-                          onClick={() => handleZoom(-0.2)}
-                          disabled={editState.zoom <= 1.0}
-                          className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-700 disabled:opacity-40"
+                          onClick={() => setEditorSubTool('adjust')}
+                          className={`px-3 py-1.5 rounded-lg text-[11.5px] font-bold flex items-center gap-1.5 transition-all ${
+                            editorSubTool === 'adjust'
+                              ? 'bg-blue-600 text-white shadow-xs'
+                              : 'text-slate-700 hover:bg-slate-100'
+                          }`}
                         >
-                          <ZoomOut className="w-4 h-4" />
+                          <Sliders className="w-3.5 h-3.5" />
+                          <span>Adjust</span>
                         </button>
-                        <span className="text-[11px] font-bold text-slate-700 font-mono w-7 text-center">
-                          {editState.zoom.toFixed(1)}x
+                      </div>
+                    </div>
+                  ) : (
+                    /* Document Preparation Hub */
+                    <div className="w-full max-w-sm bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[13px] font-bold text-slate-800">
+                          Page {activeDocPage + 1} Orientation
                         </span>
                         <button
                           type="button"
-                          onClick={() => handleZoom(0.2)}
-                          disabled={editState.zoom >= 3.0}
-                          className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-700 disabled:opacity-40"
+                          onClick={handleRotateCurrentDocPage}
+                          className="px-3 py-1.5 rounded-xl bg-blue-50 text-blue-700 border border-blue-200 text-[12px] font-bold flex items-center gap-1.5 active:scale-95"
                         >
-                          <ZoomIn className="w-4 h-4" />
-                        </button>
-                        <div className="w-px h-5 bg-slate-200 mx-1" />
-                        <button
-                          type="button"
-                          onClick={handleReset}
-                          className="p-2 rounded-lg hover:bg-slate-100 text-red-600"
-                          title="Reset Edits"
-                        >
-                          <RotateCcw className="w-4 h-4" />
+                          <RotateCw className="w-4 h-4" />
+                          <span>Rotate 90° ({currentDocRotation}°)</span>
                         </button>
                       </div>
-                    </>
-                  ) : (
-                    /* DOCUMENT PREPARATION QUICK TOOLS */
-                    <div className="w-full flex flex-col items-center justify-center p-2">
-                      <div className="w-full max-w-sm bg-white p-3 rounded-2xl border border-slate-200 shadow-sm space-y-3">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[12px] font-bold text-slate-800">
-                            Page {activeDocPage + 1} Actions
+
+                      {/* Interactive Page Selection Cards */}
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                            Printable Pages ({fileItem.selectedPages?.length || fileItem.pages} of {fileItem.pages})
                           </span>
                           <button
                             type="button"
-                            onClick={rotateCurrentDocPage}
-                            className="px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 border border-blue-200 text-[11px] font-bold flex items-center gap-1.5"
+                            onClick={() =>
+                              onUpdate({
+                                selectedPages: Array.from({ length: fileItem.pages || 1 }, (_, i) => i + 1),
+                              })
+                            }
+                            className="text-[11px] font-bold text-blue-600 hover:underline"
                           >
-                            <RotateCw className="w-3.5 h-3.5" />
-                            <span>Rotate 90° ({currentDocPageRotation}°)</span>
+                            Select All
                           </button>
                         </div>
-
-                        {/* Page Selection Strip */}
-                        <div>
-                          <div className="flex items-center justify-between mb-1.5">
-                            <span className="text-[11px] font-bold text-slate-500 uppercase">
-                              Pages to Print ({fileItem.selectedPages?.length || fileItem.pages} of {fileItem.pages})
-                            </span>
-                            <button
-                              type="button"
-                              onClick={selectAllPages}
-                              className="text-[11px] font-bold text-blue-600 hover:underline"
-                            >
-                              Select All
-                            </button>
-                          </div>
-                          <div className="flex gap-1.5 overflow-x-auto pb-1 max-w-full">
-                            {Array.from({ length: fileItem.pages || 1 }).map((_, idx) => {
-                              const pNum = idx + 1;
-                              const isSelected = (fileItem.selectedPages || []).includes(pNum);
-                              return (
-                                <button
-                                  key={pNum}
-                                  type="button"
-                                  onClick={() => {
-                                    togglePageSelection(pNum);
-                                    setActiveDocPage(idx);
-                                  }}
-                                  className={`w-9 h-11 rounded-lg border text-[12px] font-bold flex flex-col items-center justify-center transition-all shrink-0 ${
-                                    isSelected
-                                      ? 'border-blue-600 bg-blue-50 text-blue-700 font-extrabold ring-1 ring-blue-500/30'
-                                      : 'border-slate-200 bg-slate-50 text-slate-400 line-through'
-                                  }`}
-                                >
-                                  <span>{pNum}</span>
-                                  <span className="text-[8px] font-normal leading-none">
-                                    {isSelected ? 'Print' : 'Skip'}
-                                  </span>
-                                </button>
-                              );
-                            })}
-                          </div>
+                        <div className="flex gap-2 overflow-x-auto pb-2">
+                          {Array.from({ length: fileItem.pages || 1 }).map((_, idx) => {
+                            const pNum = idx + 1;
+                            const isSelected = (fileItem.selectedPages || []).includes(pNum);
+                            return (
+                              <button
+                                key={pNum}
+                                type="button"
+                                onClick={() => {
+                                  handleTogglePageSelection(pNum);
+                                  setActiveDocPage(idx);
+                                }}
+                                className={`w-10 h-13 rounded-xl border text-[12px] font-bold flex flex-col items-center justify-center transition-all shrink-0 ${
+                                  isSelected
+                                    ? 'border-blue-600 bg-blue-50 text-blue-700 font-extrabold ring-1 ring-blue-500/30'
+                                    : 'border-slate-200 bg-slate-50 text-slate-400 line-through'
+                                }`}
+                              >
+                                <span>{pNum}</span>
+                                <span className="text-[8px] font-normal leading-none mt-0.5">
+                                  {isSelected ? 'Print' : 'Skip'}
+                                </span>
+                              </button>
+                            );
+                          })}
                         </div>
                       </div>
                     </div>
@@ -903,17 +1026,52 @@ export default function PrintStudio({
               )}
             </div>
 
-            {/* Bottom Quick Switch Bar */}
-            <div className="w-full flex items-center justify-between mt-1 pt-2 border-t border-slate-200/80">
-              <span className="text-[11px] text-slate-500 font-medium">
-                {activeTab === 'preview'
-                  ? isDocument
-                    ? 'Check page layout before printing'
-                    : 'Tap Edit to crop, zoom or adjust'
-                  : isDocument
-                  ? 'Rotate or select specific pages'
-                  : 'Drag to adjust framing inside print boundary'}
-              </span>
+            {/* Quick Actions & Undo/Redo Footer Strip */}
+            <div className="w-full flex items-center justify-between pt-2 border-t border-slate-200/80 gap-2">
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={handleUndo}
+                  disabled={historyIndex <= 0}
+                  className="p-1.5 rounded-lg text-slate-600 hover:bg-white disabled:opacity-30 border border-transparent hover:border-slate-200 shadow-2xs"
+                  title="Undo (Ctrl+Z)"
+                >
+                  <Undo2 className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRedo}
+                  disabled={historyIndex >= history.length - 1}
+                  className="p-1.5 rounded-lg text-slate-600 hover:bg-white disabled:opacity-30 border border-transparent hover:border-slate-200 shadow-2xs"
+                  title="Redo (Ctrl+Y)"
+                >
+                  <Redo2 className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={handleResetAllEdits}
+                  className="p-1.5 rounded-lg text-red-600 hover:bg-red-50 border border-transparent hover:border-red-100 shadow-2xs text-[11px] font-bold flex items-center gap-1"
+                  title="Reset to Original"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Reset</span>
+                </button>
+              </div>
+
+              {/* Before/After Comparison Button */}
+              {!isDocument && (
+                <button
+                  type="button"
+                  onMouseDown={() => setIsComparingBefore(true)}
+                  onMouseUp={() => setIsComparingBefore(false)}
+                  onTouchStart={() => setIsComparingBefore(true)}
+                  onTouchEnd={() => setIsComparingBefore(false)}
+                  className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-700 text-[11px] font-bold hover:bg-slate-50 active:bg-blue-50 active:text-blue-600 shadow-2xs"
+                >
+                  {isComparingBefore ? 'Showing Original' : 'Hold for Original'}
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={() => setActiveTab(activeTab === 'preview' ? 'editor' : 'preview')}
@@ -923,320 +1081,532 @@ export default function PrintStudio({
                   ? isDocument
                     ? '📑 Prepare Document →'
                     : '✂️ Open Editor →'
-                  : '✓ View Print Preview'}
+                  : '✓ Done Editing'}
               </button>
             </div>
           </div>
 
           {/* ========================================================= */}
-          {/* RIGHT: SETTINGS, CATALOG OPTIONS & LIVE PRICING */}
+          {/* RIGHT: CONTROLS, SETTINGS & AUTHORITATIVE PRICING */}
           {/* ========================================================= */}
           <div className="md:col-span-5 p-4 flex flex-col justify-between overflow-y-auto">
             <div className="space-y-4">
               
-              {/* SECTION 1: PRINT MODE CHANGER */}
-              <div>
-                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
-                  Print Production Mode
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      onUpdate({
-                        mode: 'photo',
-                        colorMode: 'color',
-                        photoSize: fileItem.photoSize || '4x6',
-                      })
-                    }
-                    className={`p-2.5 rounded-xl border text-left transition-all ${
-                      isPhotoMode
-                        ? 'border-blue-600 bg-blue-50/60 ring-2 ring-blue-500/20'
-                        : 'border-slate-200 hover:border-slate-300'
-                    }`}
-                  >
-                    <span className="text-[13px] font-bold text-slate-900 block">📸 Photo Print</span>
-                    <span className="text-[10px] text-slate-500">Premium Glossy/Matte Paper</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() =>
-                      onUpdate({
-                        mode: isDocument ? 'document' : 'image',
-                        paperSize: fileItem.paperSize || 'a4',
-                      })
-                    }
-                    className={`p-2.5 rounded-xl border text-left transition-all ${
-                      !isPhotoMode
-                        ? 'border-blue-600 bg-blue-50/60 ring-2 ring-blue-500/20'
-                        : 'border-slate-200 hover:border-slate-300'
-                    }`}
-                  >
-                    <span className="text-[13px] font-bold text-slate-900 block">
-                      {isDocument ? '📄 Document Print' : '🖼️ Image Print'}
+              {/* SUB-TOOL SECTION 1: CROP & ASPECT RATIO (WHEN IN EDITOR TAB) */}
+              {activeTab === 'editor' && editorSubTool === 'crop' && !isDocument && (
+                <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[12px] font-black text-slate-800 uppercase tracking-wider">
+                      Crop Aspect Ratio
                     </span>
-                    <span className="text-[10px] text-slate-500">
-                      {isDocument ? 'PDF/Doc on Plain Paper' : 'Plain A4/A3 Paper (Doc Rate)'}
-                    </span>
-                  </button>
-                </div>
-              </div>
-
-              {/* SECTION 2A: PHOTO SIZE PRESETS (FOR PHOTO PRINT) */}
-              {isPhotoMode && (
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                      Photo Size Preset
-                    </label>
                     <span className="text-[11px] font-bold text-blue-600">
-                      ₹{calculationResult.ratePerImpression.toFixed(0)}/photo
+                      {editState.cropPreset.toUpperCase()}
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2">
-                    {availablePhotoSizes.map((preset) => {
-                      const isSelected = fileItem.photoSize === preset.key;
-                      return (
-                        <button
-                          key={preset.key}
-                          type="button"
-                          onClick={() => {
-                            onUpdate({ photoSize: preset.key });
-                            if (preset.key === 'passport') setShowFaceGuide(true);
-                          }}
-                          className={`p-2.5 rounded-xl border text-left transition-all ${
-                            isSelected
-                              ? 'border-blue-600 bg-blue-50/60 ring-2 ring-blue-500/20'
-                              : 'border-slate-200 hover:border-slate-300'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="text-[13px] font-bold text-slate-900">{preset.name}</span>
-                            <span className="text-[11px] font-bold text-slate-700 font-mono">₹{preset.price}</span>
-                          </div>
-                          <span className="text-[10px] text-slate-500 block mt-0.5">
-                            {preset.key === 'passport'
-                              ? '35×45 mm • 8x Sheet'
-                              : preset.key === '4x6'
-                              ? '102×152 mm'
-                              : preset.key === '5x7'
-                              ? '127×178 mm'
-                              : 'Studio Print'}
-                          </span>
-                        </button>
-                      );
-                    })}
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {(['original', '4:6', '5:7', '6:8', 'passport', '1:1', 'a4', 'free'] as CropRatioPreset[]).map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => applyCropRatioPreset(preset)}
+                        className={`py-1.5 rounded-xl border text-[11px] font-bold transition-all ${
+                          editState.cropPreset === preset
+                            ? 'border-blue-600 bg-blue-600 text-white shadow-xs'
+                            : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100'
+                        }`}
+                      >
+                        {preset.toUpperCase()}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Zoom Slider */}
+                  <div className="pt-2 border-t border-slate-200/80">
+                    <div className="flex items-center justify-between text-[11px] font-bold text-slate-700 mb-1">
+                      <span>Zoom Frame</span>
+                      <span className="font-mono">{Math.round(editState.zoom * 100)}%</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setEditState((prev) => ({ ...prev, zoom: Math.max(0.8, prev.zoom - 0.1) }))}
+                        className="p-1 rounded bg-white border border-slate-200 text-slate-700"
+                      >
+                        <ZoomOut className="w-3.5 h-3.5" />
+                      </button>
+                      <input
+                        type="range"
+                        min="0.8"
+                        max="3.0"
+                        step="0.05"
+                        value={editState.zoom}
+                        onChange={(e) => setEditState((prev) => ({ ...prev, zoom: parseFloat(e.target.value) }))}
+                        className="flex-1 accent-blue-600"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setEditState((prev) => ({ ...prev, zoom: Math.min(3.0, prev.zoom + 0.1) }))}
+                        className="p-1 rounded bg-white border border-slate-200 text-slate-700"
+                      >
+                        <ZoomIn className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
 
-              {/* SECTION 2B: PAPER SIZE (FOR DOCUMENT & IMAGE PRINT) */}
-              {!isPhotoMode && (
+              {/* SUB-TOOL SECTION 2: RESIZE, MOVE & ALIGNMENT */}
+              {activeTab === 'editor' && editorSubTool === 'transform' && !isDocument && (
+                <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 space-y-3">
+                  <span className="text-[12px] font-black text-slate-800 uppercase tracking-wider block">
+                    Page Fit Mode
+                  </span>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {(['fit', 'fill', 'actual', 'custom'] as FitMode[]).map((mode) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        onClick={() => handleSetFitMode(mode)}
+                        className={`py-1.5 rounded-xl border text-[11px] font-bold transition-all ${
+                          editState.fitMode === mode
+                            ? 'border-blue-600 bg-blue-600 text-white shadow-xs'
+                            : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100'
+                        }`}
+                      >
+                        {mode === 'fit' ? 'Fit Page' : mode === 'fill' ? 'Fill Page' : mode === 'actual' ? 'Actual' : 'Custom'}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Alignment Hub */}
+                  <div className="pt-2 border-t border-slate-200/80">
+                    <span className="text-[11px] font-bold text-slate-500 uppercase block mb-1.5">
+                      Alignment on Paper
+                    </span>
+                    <div className="grid grid-cols-5 gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => handleSetAlignment('left')}
+                        className={`p-1.5 rounded-lg border text-[11px] font-bold flex items-center justify-center ${
+                          editState.alignment === 'left' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white border-slate-200 text-slate-700'
+                        }`}
+                      >
+                        <AlignLeft className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSetAlignment('center')}
+                        className={`p-1.5 rounded-lg border text-[11px] font-bold flex items-center justify-center ${
+                          editState.alignment === 'center' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white border-slate-200 text-slate-700'
+                        }`}
+                      >
+                        <AlignCenter className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSetAlignment('right')}
+                        className={`p-1.5 rounded-lg border text-[11px] font-bold flex items-center justify-center ${
+                          editState.alignment === 'right' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white border-slate-200 text-slate-700'
+                        }`}
+                      >
+                        <AlignRight className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSetAlignment('top')}
+                        className={`p-1.5 rounded-lg border text-[11px] font-bold flex items-center justify-center ${
+                          editState.alignment === 'top' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white border-slate-200 text-slate-700'
+                        }`}
+                      >
+                        <ArrowUp className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSetAlignment('bottom')}
+                        className={`p-1.5 rounded-lg border text-[11px] font-bold flex items-center justify-center ${
+                          editState.alignment === 'bottom' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white border-slate-200 text-slate-700'
+                        }`}
+                      >
+                        <ArrowDown className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Rotate & Flip Hub */}
+                  <div className="pt-2 border-t border-slate-200/80 flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-slate-500 uppercase">
+                      Rotate & Flip
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => handleRotateQuarter('ccw')}
+                        className="p-1.5 rounded-lg bg-white border border-slate-200 text-slate-700"
+                        title="Rotate Left 90°"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleRotateQuarter('cw')}
+                        className="p-1.5 rounded-lg bg-white border border-slate-200 text-slate-700"
+                        title="Rotate Right 90°"
+                      >
+                        <RotateCw className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleFlip('h')}
+                        className={`p-1.5 rounded-lg border ${
+                          editState.flipH ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-white border-slate-200 text-slate-700'
+                        }`}
+                        title="Flip Horizontal"
+                      >
+                        <FlipHorizontal className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleFlip('v')}
+                        className={`p-1.5 rounded-lg border ${
+                          editState.flipV ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-white border-slate-200 text-slate-700'
+                        }`}
+                        title="Flip Vertical"
+                      >
+                        <FlipVertical className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* SUB-TOOL SECTION 3: IMAGE ADJUSTMENTS */}
+              {activeTab === 'editor' && editorSubTool === 'adjust' && !isDocument && (
+                <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[12px] font-black text-slate-800 uppercase tracking-wider">
+                      Color & Clarity
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleAutoEnhance}
+                      className="px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 border border-blue-200 text-[11px] font-bold flex items-center gap-1 active:scale-95"
+                    >
+                      <Sparkle className="w-3 h-3 text-blue-600 fill-blue-600" />
+                      <span>Auto Enhance</span>
+                    </button>
+                  </div>
+
+                  {/* Brightness */}
+                  <div>
+                    <div className="flex items-center justify-between text-[11px] font-bold text-slate-700 mb-0.5">
+                      <span>Brightness</span>
+                      <span className="font-mono">{editState.adjustments.brightness > 0 ? `+${editState.adjustments.brightness}` : editState.adjustments.brightness}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="-50"
+                      max="50"
+                      value={editState.adjustments.brightness}
+                      onChange={(e) =>
+                        setEditState((prev) => ({
+                          ...prev,
+                          adjustments: { ...prev.adjustments, brightness: parseInt(e.target.value, 10) },
+                        }))
+                      }
+                      className="w-full accent-blue-600"
+                    />
+                  </div>
+
+                  {/* Contrast */}
+                  <div>
+                    <div className="flex items-center justify-between text-[11px] font-bold text-slate-700 mb-0.5">
+                      <span>Contrast</span>
+                      <span className="font-mono">{editState.adjustments.contrast > 0 ? `+${editState.adjustments.contrast}` : editState.adjustments.contrast}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="-50"
+                      max="50"
+                      value={editState.adjustments.contrast}
+                      onChange={(e) =>
+                        setEditState((prev) => ({
+                          ...prev,
+                          adjustments: { ...prev.adjustments, contrast: parseInt(e.target.value, 10) },
+                        }))
+                      }
+                      className="w-full accent-blue-600"
+                    />
+                  </div>
+
+                  {/* Saturation */}
+                  <div>
+                    <div className="flex items-center justify-between text-[11px] font-bold text-slate-700 mb-0.5">
+                      <span>Saturation</span>
+                      <span className="font-mono">{editState.adjustments.saturation > 0 ? `+${editState.adjustments.saturation}` : editState.adjustments.saturation}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="-50"
+                      max="50"
+                      value={editState.adjustments.saturation}
+                      onChange={(e) =>
+                        setEditState((prev) => ({
+                          ...prev,
+                          adjustments: { ...prev.adjustments, saturation: parseInt(e.target.value, 10) },
+                        }))
+                      }
+                      className="w-full accent-blue-600"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* SECTION: PRINT SETTINGS (PAPER, PHOTO SIZE, ORIENTATION, SIDES, COPIES) */}
+              <div className="space-y-3.5">
+                {/* 1. Production Mode */}
                 <div>
                   <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
-                    Paper Size
+                    Print Mode
                   </label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {availablePaperSizes.map((p) => {
-                      const isSelected = fileItem.paperSize === p.key;
-                      return (
-                        <button
-                          key={p.key}
-                          type="button"
-                          onClick={() => onUpdate({ paperSize: p.key })}
-                          className={`p-2 rounded-xl border text-center transition-all ${
-                            isSelected
-                              ? 'border-blue-600 bg-blue-600 text-white shadow-xs'
-                              : 'border-slate-200 bg-white text-slate-800 hover:bg-slate-50'
-                          }`}
-                        >
-                          <span className="text-[13px] font-bold block">{p.name}</span>
-                          <span className={`text-[10px] ${isSelected ? 'text-blue-100' : 'text-slate-400'}`}>
-                            {p.key === 'a4' ? '210×297 mm' : p.key === 'a3' ? '297×420 mm' : 'Configured'}
-                          </span>
-                        </button>
-                      );
-                    })}
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onUpdate({
+                          mode: 'photo',
+                          colorMode: 'color',
+                          photoSize: fileItem.photoSize || '4x6',
+                        })
+                      }
+                      className={`p-2 rounded-xl border text-left transition-all ${
+                        isPhotoMode
+                          ? 'border-blue-600 bg-blue-50/60 ring-2 ring-blue-500/20'
+                          : 'border-slate-200 hover:border-slate-300'
+                      }`}
+                    >
+                      <span className="text-[13px] font-bold text-slate-900 block">📸 Photo Print</span>
+                      <span className="text-[10px] text-slate-500">Premium Glossy/Matte</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onUpdate({
+                          mode: isDocument ? 'document' : 'image',
+                          paperSize: fileItem.paperSize || 'a4',
+                        })
+                      }
+                      className={`p-2 rounded-xl border text-left transition-all ${
+                        !isPhotoMode
+                          ? 'border-blue-600 bg-blue-50/60 ring-2 ring-blue-500/20'
+                          : 'border-slate-200 hover:border-slate-300'
+                      }`}
+                    >
+                      <span className="text-[13px] font-bold text-slate-900 block">
+                        {isDocument ? '📄 Document' : '🖼️ Image Print'}
+                      </span>
+                      <span className="text-[10px] text-slate-500">Plain A4/A3 Paper</span>
+                    </button>
                   </div>
                 </div>
-              )}
 
-              {/* SECTION 3: ORIENTATION */}
-              <div>
-                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
-                  Print Orientation
-                </label>
+                {/* 2. Photo Size Presets (When in Photo Mode) */}
+                {isPhotoMode && (
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
+                      Target Photo Size
+                    </label>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {Object.keys(PHOTO_TARGET_SIZES_MM).map((key) => {
+                        const target = PHOTO_TARGET_SIZES_MM[key];
+                        const isSelected = fileItem.photoSize === key;
+                        return (
+                          <button
+                            key={key}
+                            type="button"
+                            onClick={() => {
+                              onUpdate({ photoSize: key });
+                              if (key === 'passport') {
+                                applyCropRatioPreset('passport');
+                              } else if (key === '4x6') {
+                                applyCropRatioPreset('4:6');
+                              } else if (key === '5x7') {
+                                applyCropRatioPreset('5:7');
+                              }
+                            }}
+                            className={`p-2 rounded-xl border text-left transition-all ${
+                              isSelected
+                                ? 'border-blue-600 bg-blue-50 text-blue-900 font-bold ring-1 ring-blue-500/30'
+                                : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                            }`}
+                          >
+                            <span className="text-[12px] block">{target.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* 3. Paper Size & Orientation */}
                 <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
+                      Paper Size
+                    </label>
+                    <select
+                      value={fileItem.paperSize || 'a4'}
+                      onChange={(e) => onUpdate({ paperSize: e.target.value })}
+                      className="w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-slate-800 text-[13px] font-bold outline-none"
+                    >
+                      <option value="a4">A4 (210 × 297 mm)</option>
+                      <option value="a3">A3 (297 × 420 mm)</option>
+                      <option value="legal">Legal (216 × 356 mm)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
+                      Orientation
+                    </label>
+                    <div className="flex bg-slate-100 p-0.5 rounded-xl border border-slate-200 h-10 items-center">
+                      <button
+                        type="button"
+                        onClick={() => onUpdate({ orientation: 'portrait' })}
+                        className={`flex-1 h-9 rounded-lg text-[12px] font-bold transition-all ${
+                          fileItem.orientation === 'portrait' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600'
+                        }`}
+                      >
+                        Portrait
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onUpdate({ orientation: 'landscape' })}
+                        className={`flex-1 h-9 rounded-lg text-[12px] font-bold transition-all ${
+                          fileItem.orientation === 'landscape' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600'
+                        }`}
+                      >
+                        Landscape
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 4. Duplex (for Documents) */}
+                {isDocument && (
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
+                      Print Sides
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => onUpdate({ sides: 'single' })}
+                        className={`p-2 rounded-xl border text-left transition-all ${
+                          fileItem.sides === 'single'
+                            ? 'border-blue-600 bg-blue-50 text-blue-700 ring-1 ring-blue-500/30'
+                            : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                        }`}
+                      >
+                        <span className="text-[12px] font-bold block">Single-Sided</span>
+                        <span className="text-[10px] text-slate-500">Print on one side</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onUpdate({ sides: 'duplex' })}
+                        className={`p-2 rounded-xl border text-left transition-all ${
+                          fileItem.sides === 'duplex'
+                            ? 'border-blue-600 bg-blue-50 text-blue-700 ring-1 ring-blue-500/30'
+                            : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                        }`}
+                      >
+                        <span className="text-[12px] font-bold block">Double-Sided</span>
+                        <span className="text-[10px] text-slate-500">Print on both sides</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* 5. Color & Copies */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
+                      Color Mode
+                    </label>
+                    <div className="flex bg-slate-100 p-0.5 rounded-xl border border-slate-200 h-10 items-center">
+                      <button
+                        type="button"
+                        onClick={() => onUpdate({ colorMode: 'color' })}
+                        className={`flex-1 h-9 rounded-lg text-[12px] font-bold transition-all ${
+                          fileItem.colorMode === 'color' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600'
+                        }`}
+                      >
+                        Color
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onUpdate({ colorMode: 'bw' })}
+                        className={`flex-1 h-9 rounded-lg text-[12px] font-bold transition-all ${
+                          fileItem.colorMode === 'bw' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600'
+                        }`}
+                      >
+                        B&W
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
+                      Copies
+                    </label>
+                    <div className="flex items-center justify-between bg-slate-100 p-0.5 rounded-xl border border-slate-200 h-10 px-1">
+                      <button
+                        type="button"
+                        onClick={() => onUpdate({ copies: Math.max(1, (fileItem.copies || 1) - 1) })}
+                        disabled={(fileItem.copies || 1) <= 1}
+                        className="w-8 h-8 rounded-lg bg-white text-slate-800 font-bold flex items-center justify-center disabled:opacity-30 shadow-xs"
+                      >
+                        -
+                      </button>
+                      <span className="text-[13px] font-bold text-slate-900 font-mono">
+                        {fileItem.copies || 1}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => onUpdate({ copies: (fileItem.copies || 1) + 1 })}
+                        className="w-8 h-8 rounded-lg bg-white text-slate-800 font-bold flex items-center justify-center shadow-xs"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 6. Borderless Toggle */}
+                <div className="flex items-center justify-between p-2.5 bg-slate-50 rounded-xl border border-slate-200">
+                  <div className="flex flex-col">
+                    <span className="text-[12px] font-bold text-slate-800">Borderless Printing</span>
+                    <span className="text-[10px] text-slate-500">Expands image to edge of paper sheet</span>
+                  </div>
                   <button
                     type="button"
-                    onClick={() => onUpdate({ orientation: 'portrait' })}
-                    className={`p-2.5 rounded-xl border text-[13px] font-bold flex items-center justify-center gap-2 transition-all ${
-                      fileItem.orientation === 'portrait'
-                        ? 'border-blue-600 bg-blue-50 text-blue-700 ring-2 ring-blue-500/20'
-                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                    onClick={() => onUpdate({ borderless: !fileItem.borderless })}
+                    className={`w-11 h-6 rounded-full transition-colors relative flex items-center p-0.5 ${
+                      fileItem.borderless ? 'bg-blue-600' : 'bg-slate-300'
                     }`}
                   >
-                    <span>📄 Portrait</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onUpdate({ orientation: 'landscape' })}
-                    className={`p-2.5 rounded-xl border text-[13px] font-bold flex items-center justify-center gap-2 transition-all ${
-                      fileItem.orientation === 'landscape'
-                        ? 'border-blue-600 bg-blue-50 text-blue-700 ring-2 ring-blue-500/20'
-                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                    }`}
-                  >
-                    <span>▭ Landscape</span>
+                    <div
+                      className={`w-5 h-5 rounded-full bg-white shadow-xs transition-transform ${
+                        fileItem.borderless ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
                   </button>
                 </div>
               </div>
 
-              {/* SECTION 4: DUPLEX (FOR DOCUMENTS) */}
-              {isDocument && (
-                <div>
-                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
-                    Print Sides
-                  </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => onUpdate({ sides: 'single' })}
-                      className={`p-2.5 rounded-xl border text-left transition-all ${
-                        fileItem.sides === 'single'
-                          ? 'border-blue-600 bg-blue-50 text-blue-700 ring-2 ring-blue-500/20'
-                          : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                      }`}
-                    >
-                      <span className="text-[13px] font-bold block">Single-Sided</span>
-                      <span className="text-[10px] text-slate-500">Print on one side</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onUpdate({ sides: 'duplex' })}
-                      className={`p-2.5 rounded-xl border text-left transition-all ${
-                        fileItem.sides === 'duplex'
-                          ? 'border-blue-600 bg-blue-50 text-blue-700 ring-2 ring-blue-500/20'
-                          : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                      }`}
-                    >
-                      <span className="text-[13px] font-bold block">Double-Sided</span>
-                      <span className="text-[10px] text-slate-500">Print on both sides</span>
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* SECTION 5: COLOR & COPIES */}
-              <div className="grid grid-cols-2 gap-3">
-                {/* Color Spectrum */}
-                <div>
-                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
-                    Color Spectrum
-                  </label>
-                  <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
-                    <button
-                      type="button"
-                      onClick={() => onUpdate({ colorMode: 'color' })}
-                      className={`flex-1 py-1.5 text-[11px] font-bold rounded-lg transition-all ${
-                        fileItem.colorMode === 'color' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600'
-                      }`}
-                    >
-                      Color
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onUpdate({ colorMode: 'bw' })}
-                      className={`flex-1 py-1.5 text-[11px] font-bold rounded-lg transition-all ${
-                        fileItem.colorMode === 'bw' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600'
-                      }`}
-                    >
-                      B&W
-                    </button>
-                  </div>
-                </div>
-
-                {/* Copies Counter */}
-                <div>
-                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
-                    Print Copies
-                  </label>
-                  <div className="flex items-center justify-between bg-slate-100 p-1 rounded-xl border border-slate-200">
-                    <button
-                      type="button"
-                      onClick={() => onUpdate({ copies: Math.max(1, (fileItem.copies || 1) - 1) })}
-                      disabled={fileItem.copies <= 1}
-                      className="w-7 h-7 rounded-lg bg-white text-slate-800 font-bold flex items-center justify-center disabled:opacity-40 shadow-xs"
-                    >
-                      -
-                    </button>
-                    <span className="text-[13px] font-bold text-slate-900 font-mono">
-                      {fileItem.copies || 1}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => onUpdate({ copies: (fileItem.copies || 1) + 1 })}
-                      className="w-7 h-7 rounded-lg bg-white text-slate-800 font-bold flex items-center justify-center shadow-xs"
-                    >
-                      +
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* SECTION 6: BASIC ADJUSTMENTS (FOR PHOTO & IMAGE) */}
-              {!isDocument && (
-                <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2.5">
-                  <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
-                    <span className="flex items-center gap-1.5">
-                      <Sun className="w-3.5 h-3.5 text-amber-500" />
-                      <span>Brightness ({editState.brightness > 0 ? `+${editState.brightness}` : editState.brightness}%)</span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setEditState((prev) => ({ ...prev, brightness: 0 }))}
-                      className="text-[10px] text-blue-600 hover:underline"
-                    >
-                      Reset
-                    </button>
-                  </div>
-                  <input
-                    type="range"
-                    min="-50"
-                    max="50"
-                    value={editState.brightness}
-                    onChange={(e) => setEditState((prev) => ({ ...prev, brightness: parseInt(e.target.value, 10) }))}
-                    className="w-full accent-blue-600"
-                  />
-
-                  <div className="flex items-center justify-between text-[11px] font-bold text-slate-700 pt-1">
-                    <span className="flex items-center gap-1.5">
-                      <Sliders className="w-3.5 h-3.5 text-blue-500" />
-                      <span>Contrast ({editState.contrast > 0 ? `+${editState.contrast}` : editState.contrast}%)</span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setEditState((prev) => ({ ...prev, contrast: 0 }))}
-                      className="text-[10px] text-blue-600 hover:underline"
-                    >
-                      Reset
-                    </button>
-                  </div>
-                  <input
-                    type="range"
-                    min="-50"
-                    max="50"
-                    value={editState.contrast}
-                    onChange={(e) => setEditState((prev) => ({ ...prev, contrast: parseInt(e.target.value, 10) }))}
-                    className="w-full accent-blue-600"
-                  />
-                </div>
-              )}
-
-              {/* SECTION 7: AUTHORITATIVE PRICE BREAKDOWN */}
-              <div className="bg-blue-50/50 border border-blue-200 rounded-xl overflow-hidden">
+              {/* AUTHORITATIVE LIVE PRICING BREAKDOWN */}
+              <div className="bg-blue-50/60 border border-blue-200 rounded-2xl overflow-hidden mt-2">
                 <button
                   type="button"
                   onClick={() => setShowPriceBreakdown(!showPriceBreakdown)}
@@ -1251,7 +1621,7 @@ export default function PrintStudio({
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-[16px] font-extrabold text-blue-700">
+                    <span className="text-[16px] font-extrabold text-blue-700 font-mono">
                       {calculationResult.formattedTotal}
                     </span>
                     {showPriceBreakdown ? (
@@ -1279,7 +1649,7 @@ export default function PrintStudio({
               </div>
             </div>
 
-            {/* STICKY BOTTOM ACTION BAR (NEVER GETS CLIPPED) */}
+            {/* STICKY BOTTOM ACTION BAR (NEVER GETS CLIPPED BY MOBILE BROWSER) */}
             <div className="pt-3 pb-safe border-t border-slate-100 flex items-center gap-2.5 bg-white mt-4 sticky bottom-0 z-20">
               <button
                 type="button"

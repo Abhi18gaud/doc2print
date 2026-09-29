@@ -33,8 +33,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`${ibmPlexSans.variable} ${spaceMono.variable}`}>
-      <body className="min-h-screen bg-[#fafaf7] text-[#1c1b1f] font-sans antialiased flex flex-col selection:bg-[#ff5a1f] selection:text-white">
+    <html lang="en" suppressHydrationWarning className={`${ibmPlexSans.variable} ${spaceMono.variable}`}>
+      <body suppressHydrationWarning className="min-h-screen bg-[#fafaf7] text-[#1c1b1f] font-sans antialiased flex flex-col selection:bg-[#ff5a1f] selection:text-white">
         <AuthProvider>{children}</AuthProvider>
       </body>
     </html>
