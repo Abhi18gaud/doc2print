@@ -59,14 +59,14 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
             </button>
           ) : null}
 
-          <div className="w-8 h-8 rounded bg-[#1c1b1f] text-white flex items-center justify-center shrink-0 shadow-sm">
-            <Printer className="w-4 h-4 text-[#ff5a1f]" />
+          <div className="w-8 h-8 rounded-lg overflow-hidden shrink-0 shadow-xs flex items-center justify-center bg-white border border-[#e6e5df]">
+            <img src="/logo.png" alt="Gaurprint" className="w-full h-full object-contain" />
           </div>
 
           <div className="flex flex-col min-w-0">
             <div className="flex items-center gap-1.5 leading-none">
-              <span className="font-bold text-[15px] tracking-tight text-[#1c1b1f]">
-                QuickPrint
+              <span className="font-extrabold text-[16px] tracking-tight">
+                <span className="text-[#0F172A]">Gaur</span><span className="text-[#0284C7]">print</span>
               </span>
               <span className="text-[10px] font-mono font-bold px-1 py-0.5 rounded bg-[#e8e8e5] text-[#6b6966]">
                 KIOSK

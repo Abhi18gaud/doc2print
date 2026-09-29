@@ -15,8 +15,8 @@
   <header class="app-titlebar">
     <div class="titlebar-left">
       <div class="app-brand">
-        <div class="brand-badge">QP</div>
-        <span class="brand-title">QuickPrint <span class="brand-subtitle">Counter OS</span></span>
+        <img src="logo.png" alt="Gaurprint Logo" class="brand-logo-img" style="width:26px; height:26px; border-radius:6px; object-fit:contain; flex-shrink:0;" />
+        <span class="brand-title"><span class="brand-gaur">Gaur</span><span class="brand-print">print</span> <span class="brand-subtitle">Counter OS</span></span>
       </div>
       <div class="status-indicator live" id="shopStatusIndicator">
         <span class="pulse-dot"></span>
@@ -248,32 +248,85 @@
         </div>
       </section>
 
-      <!-- VIEW 2: PRINT HISTORY LOG -->
+      <!-- VIEW 2: PRINT JOBS AUDIT LOG -->
       <section class="content-view" id="view-history">
         <div class="view-header">
           <div>
-            <h1 class="view-title">Print Jobs Log</h1>
-            <p class="view-subtitle">Audit trail of all processed customer documents and tokens</p>
+            <h1 class="view-title">Print Jobs Log & Audit Trail</h1>
+            <p class="view-subtitle">Comprehensive ledger of customer orders, paper specs, financial settlements, and hardware routing</p>
           </div>
           <div class="header-actions">
-            <input type="text" class="input-search" id="historySearchInput" placeholder="Search by Token, Phone, or File...">
-            <button class="btn btn-secondary btn-sm" id="btnExportJobs">Export CSV</button>
+            <input type="text" class="input-search" id="historySearchInput" placeholder="Search by Token, File, Customer, or Phone..." style="min-width: 280px;">
+            <button class="btn btn-secondary btn-sm" id="btnExportJobs">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              <span>Export Audit CSV</span>
+            </button>
           </div>
         </div>
 
+        <!-- TOP AUDIT KPI SUMMARY STRIP -->
+        <div class="audit-kpi-strip" id="historyKpiStrip">
+          <div class="audit-kpi-card">
+            <span class="audit-kpi-label">TOTAL LOGGED ORDERS</span>
+            <span class="audit-kpi-val" id="histKpiTotalOrders">0 Orders</span>
+            <span class="audit-kpi-sub" id="histKpiCompletedSub">0 completed</span>
+          </div>
+          <div class="audit-kpi-card">
+            <span class="audit-kpi-label">GROSS AUDIT REVENUE</span>
+            <span class="audit-kpi-val text-success" id="histKpiTotalRevenue">₹0.00</span>
+            <span class="audit-kpi-sub">Total revenue tracked</span>
+          </div>
+          <div class="audit-kpi-card">
+            <span class="audit-kpi-label">TOTAL PAGES SPOOLED</span>
+            <span class="audit-kpi-val" id="histKpiTotalPages">0 Pages</span>
+            <span class="audit-kpi-sub" id="histKpiSheetsSub">0 physical sheets</span>
+          </div>
+          <div class="audit-kpi-card">
+            <span class="audit-kpi-label">PAYMENT BREAKDOWN</span>
+            <span class="audit-kpi-val" id="histKpiPaymentSplit">₹0 UPI / ₹0 Cash</span>
+            <span class="audit-kpi-sub" id="histKpiUpiRatio">0% digital adoption</span>
+          </div>
+          <div class="audit-kpi-card">
+            <span class="audit-kpi-label">SPOOL SUCCESS RATE</span>
+            <span class="audit-kpi-val text-primary" id="histKpiSuccessRate">100%</span>
+            <span class="audit-kpi-sub" id="histKpiSuccessSub">0 hardware errors</span>
+          </div>
+        </div>
+
+        <!-- FILTER TABS & TIMEFRAME BAR -->
+        <div class="view-action-bar" style="margin-bottom: 14px;">
+          <div class="filter-pills" id="historyFilterPills">
+            <button class="filter-pill active" data-hist-filter="all">All Orders (<span id="histFilterAllCount">0</span>)</button>
+            <button class="filter-pill" data-hist-filter="completed">Completed (<span id="histFilterCompCount">0</span>)</button>
+            <button class="filter-pill" data-hist-filter="failed">Failed / Issues (<span id="histFilterFailCount">0</span>)</button>
+            <button class="filter-pill" data-hist-filter="upi">UPI Paid (<span id="histFilterUpiCount">0</span>)</button>
+            <button class="filter-pill" data-hist-filter="cash">Cash at Counter (<span id="histFilterCashCount">0</span>)</button>
+          </div>
+          <div class="action-buttons-group">
+            <select class="select-input" id="historyTimeRangeSelect" style="padding: 5px 12px; font-size: 12px; font-weight: 600;">
+              <option value="all">All History</option>
+              <option value="today">Today Only</option>
+              <option value="yesterday">Yesterday</option>
+              <option value="week">Last 7 Days</option>
+              <option value="month">This Month</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- RICH AUDIT DATA TABLE -->
         <div class="table-container">
           <table class="data-table" id="historyTable">
             <thead>
               <tr>
-                <th>TOKEN</th>
+                <th>TOKEN & ID</th>
                 <th>TIMESTAMP</th>
-                <th>CUSTOMER</th>
-                <th>PAGES / COPIES</th>
+                <th>DOCUMENT & MEDIA</th>
+                <th>PAGES / SHEETS</th>
                 <th>PRINT SPECS</th>
-                <th>AMOUNT</th>
-                <th>PAYMENT</th>
+                <th>PRINTER ROUTED</th>
+                <th>AMOUNT & MODE</th>
                 <th>STATUS</th>
-                <th>ACTIONS</th>
+                <th style="text-align: right;">AUDIT ACTIONS</th>
               </tr>
             </thead>
             <tbody id="historyTableBody">
@@ -484,58 +537,197 @@
         </div>
       </section>
 
-      <!-- VIEW 4: DAILY EARNINGS & COUNTERS -->
+      <!-- VIEW 4: DAILY FINANCIALS & EARNINGS DASHBOARD -->
       <section class="content-view" id="view-financials">
         <div class="view-header">
           <div>
-            <h1 class="view-title">Daily Financials & Paper Counters</h1>
-            <p class="view-subtitle">Track counter revenue, UPI settlements, and physical paper consumption</p>
+            <h1 class="view-title">Financial Analytics & Daily Earnings</h1>
+            <p class="view-subtitle">Executive revenue intelligence, payment settlements, and paper inventory consumption</p>
           </div>
-          <button class="btn btn-secondary btn-sm" id="btnRefreshEarnings">↻ Refresh Data</button>
+          <div class="header-actions">
+            <!-- Timeframe Filter Switcher -->
+            <div class="earnings-time-switcher" id="earningsTimeSwitcher">
+              <button class="time-pill active" data-range="today">Today</button>
+              <button class="time-pill" data-range="yesterday">Yesterday</button>
+              <button class="time-pill" data-range="week">Last 7 Days</button>
+              <button class="time-pill" data-range="month">This Month</button>
+              <button class="time-pill" data-range="all">All Time</button>
+            </div>
+            <button class="btn btn-secondary btn-sm" id="btnRefreshEarnings">↻ Refresh</button>
+            <button class="btn btn-secondary btn-sm" id="btnExportEarningsCsv">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              <span>Export Report</span>
+            </button>
+          </div>
         </div>
 
-        <div class="financials-grid">
+        <!-- PERIOD BANNER -->
+        <div class="earnings-period-banner">
+          <div class="period-info">
+            <span class="period-dot green"></span>
+            <span class="period-text" id="earningsPeriodLabel">Showing financial metrics for: <strong>Today</strong></span>
+          </div>
+          <span class="period-badge" id="earningsOrdersCountBadge">0 Orders Processed</span>
+        </div>
+
+        <!-- 5 EXECUTIVE KPI CARDS -->
+        <div class="financials-kpi-grid">
           <div class="stat-box primary">
-            <span class="stat-label">Total Day's Gross</span>
+            <div class="stat-box-header">
+              <span class="stat-label">TOTAL GROSS REVENUE</span>
+              <span class="stat-badge blue" id="finRevenueGrowth">Gross</span>
+            </div>
             <span class="stat-value" id="finTotalRevenue">₹0.00</span>
-            <span class="stat-footer">Today's completed orders</span>
+            <span class="stat-footer" id="finRevenueSub">0 total completed orders</span>
           </div>
+
           <div class="stat-box success">
-            <span class="stat-label">UPI Online Payments</span>
+            <div class="stat-box-header">
+              <span class="stat-label">UPI ONLINE PAYMENTS</span>
+              <span class="stat-badge green" id="finUpiPercent">0%</span>
+            </div>
             <span class="stat-value" id="finUpiRevenue">₹0.00</span>
-            <span class="stat-footer">Direct bank settlement</span>
+            <span class="stat-footer" id="finUpiSub">Direct bank settlement</span>
           </div>
+
           <div class="stat-box warning">
-            <span class="stat-label">Cash at Counter</span>
+            <div class="stat-box-header">
+              <span class="stat-label">CASH AT COUNTER</span>
+              <span class="stat-badge amber" id="finCashPercent">0%</span>
+            </div>
             <span class="stat-value" id="finCashRevenue">₹0.00</span>
-            <span class="stat-footer">Collected in cash drawer</span>
+            <span class="stat-footer" id="finCashSub">Collected in cash drawer</span>
           </div>
+
           <div class="stat-box info">
-            <span class="stat-label">Total Sheets Consumed</span>
-            <span class="stat-value" id="finPaperConsumed">0 A4</span>
-            <span class="stat-footer">Estimated physical paper count</span>
+            <div class="stat-box-header">
+              <span class="stat-label">PHYSICAL PAPER CONSUMED</span>
+              <span class="stat-badge purple" id="finReamPercent">0.0 Ream</span>
+            </div>
+            <span class="stat-value" id="finPaperConsumed">0 Sheets</span>
+            <span class="stat-footer" id="finPaperSub">Paper inventory leaves</span>
+          </div>
+
+          <div class="stat-box teal">
+            <div class="stat-box-header">
+              <span class="stat-label">AVERAGE BASKET (AOV)</span>
+              <span class="stat-badge teal">Per Order</span>
+            </div>
+            <span class="stat-value" id="finAvgOrderValue">₹0.00</span>
+            <span class="stat-footer" id="finAvgPagesSub">0 pages / order avg</span>
           </div>
         </div>
 
-        <div class="card-panel">
-          <h3>Paper Usage Breakdown</h3>
-          <div class="paper-breakdown-row">
+        <!-- VISUAL CHARTS SECTION (2-COLUMN GRID) -->
+        <div class="charts-grid-row">
+          <!-- MAIN CHART: REVENUE TIMELINE TREND -->
+          <div class="chart-card wide-chart">
+            <div class="chart-card-header">
+              <div>
+                <h3 class="chart-title">Revenue & Volume Timeline</h3>
+                <span class="chart-sub" id="chartTimelineSub">Hourly revenue generation throughout the day</span>
+              </div>
+              <div class="chart-legend-row">
+                <span class="legend-item"><span class="legend-dot" style="background:#2563EB;"></span> Revenue (₹)</span>
+                <span class="legend-item"><span class="legend-dot" style="background:#10B981;"></span> Orders</span>
+              </div>
+            </div>
+            <div class="chart-svg-container" id="revenueTimelineChartContainer">
+              <!-- Responsive SVG Line / Area / Bar Chart rendered via JS -->
+            </div>
+          </div>
+
+          <!-- DONUT CHART: PAYMENT METHOD DISTRIBUTION -->
+          <div class="chart-card donut-chart-card">
+            <div class="chart-card-header">
+              <div>
+                <h3 class="chart-title">Payment Channel Split</h3>
+                <span class="chart-sub">Digital UPI vs Physical Cash</span>
+              </div>
+            </div>
+            <div class="donut-chart-wrapper" id="paymentDonutWrapper">
+              <!-- SVG Donut Chart rendered via JS -->
+            </div>
+            <div class="donut-legend-list" id="paymentDonutLegend">
+              <!-- Injected via JS -->
+            </div>
+          </div>
+        </div>
+
+        <!-- PRINT MODE & PAPER CONSUMPTION METRICS -->
+        <div class="card-panel" style="margin-top: 20px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+            <div>
+              <h3 style="font-size:15px; font-weight:800; color:var(--text-primary);">Consumables, Paper & Ink Volume Breakdown</h3>
+              <span style="font-size:12px; color:var(--text-muted);">Detailed material usage and printing mode distribution</span>
+            </div>
+            <div class="badge-chip grey" id="colorBwRatioPill" style="font-weight:700;">
+              Ratio: 0% Color • 100% B&W
+            </div>
+          </div>
+
+          <!-- Segmented Ratio Progress Bar -->
+          <div class="ratio-bar-container">
+            <div class="ratio-segment bw" id="ratioSegmentBw" style="width: 50%;" title="Black & White"></div>
+            <div class="ratio-segment color" id="ratioSegmentColor" style="width: 50%;" title="Full Color"></div>
+          </div>
+          <div class="ratio-bar-legend">
+            <span class="ratio-legend-item"><span class="ratio-dot bw"></span> <strong>B&W Laser:</strong> <span id="ratioBwText">0 Pages</span></span>
+            <span class="ratio-legend-item"><span class="ratio-dot color"></span> <strong>Full Color:</strong> <span id="ratioColorText">0 Pages</span></span>
+          </div>
+
+          <div class="paper-breakdown-row" style="margin-top: 18px;">
             <div class="paper-stat-item">
               <span class="paper-stat-num" id="finBwPages">0</span>
               <span class="paper-stat-desc">Black & White Pages</span>
+              <span class="paper-stat-extra" id="finBwRevenueExtra">₹0.00 earned</span>
             </div>
             <div class="paper-stat-item">
               <span class="paper-stat-num" id="finColorPages">0</span>
               <span class="paper-stat-desc">Full Color Pages</span>
+              <span class="paper-stat-extra" id="finColorRevenueExtra">₹0.00 earned</span>
             </div>
             <div class="paper-stat-item">
               <span class="paper-stat-num" id="finDuplexSheets">0</span>
               <span class="paper-stat-desc">Duplex (Double Sided)</span>
+              <span class="paper-stat-extra" id="finDuplexSavedExtra">Paper efficient</span>
             </div>
             <div class="paper-stat-item">
               <span class="paper-stat-num" id="finSingleSheets">0</span>
               <span class="paper-stat-desc">Single Sided Sheets</span>
+              <span class="paper-stat-extra">Standard feed</span>
             </div>
+          </div>
+        </div>
+
+        <!-- TRANSACTIONS FINANCIAL AUDIT TABLE -->
+        <div class="card-panel" style="margin-top: 20px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+            <div>
+              <h3 style="font-size:15px; font-weight:800; color:var(--text-primary);">Settled Period Ledger</h3>
+              <span style="font-size:12px; color:var(--text-muted);">Itemized financial records for the selected period</span>
+            </div>
+            <span class="badge-chip green" id="finPeriodLedgerCount">0 Transactions</span>
+          </div>
+
+          <div class="table-container">
+            <table class="data-table" id="earningsLedgerTable">
+              <thead>
+                <tr>
+                  <th>TIME</th>
+                  <th>TOKEN</th>
+                  <th>CUSTOMER / DOCUMENT</th>
+                  <th>SPECS</th>
+                  <th>SHEETS</th>
+                  <th>PAYMENT CHANNEL</th>
+                  <th>STATUS</th>
+                  <th style="text-align:right;">GROSS REVENUE</th>
+                </tr>
+              </thead>
+              <tbody id="earningsLedgerBody">
+                <!-- Rendered via JS -->
+              </tbody>
+            </table>
           </div>
         </div>
       </section>
@@ -1051,8 +1243,8 @@
   <div class="auth-overlay" id="authOverlay">
     <div class="auth-modal">
       <div class="auth-header">
-        <div class="auth-brand-badge">QP</div>
-        <h2>QuickPrint Counter OS</h2>
+        <img src="logo.png" alt="Gaurprint Logo" style="width:48px; height:48px; border-radius:10px; object-fit:contain; margin:0 auto 12px; display:block;" />
+        <h2><span class="brand-gaur">Gaur</span><span class="brand-print">print</span> Counter OS</h2>
         <p class="auth-subtitle">Standalone Industrial Print Terminal for Print & Xerox Shops</p>
       </div>
 
@@ -1120,44 +1312,106 @@
         <button class="modal-close" id="btnCloseQrModal">✕</button>
       </div>
       <div class="modal-body qr-modal-body">
-        <!-- Physical Counter Standee Printable Card Mockup -->
+        <!-- Physical Counter Standee Printable Card Mockup (Gaurprint Marketing Standee) -->
         <div class="counter-standee-preview" id="counterStandeeCard">
-          <div class="standee-acrylic-top">
-            <div class="standee-brand-pill">
-              <span class="standee-logo-icon">🖨️</span>
-              <span class="standee-brand-text">GAURPRINT</span>
-            </div>
-            <h2 class="standee-tagline">SCAN TO PRINT</h2>
-            <p class="standee-subtext">Upload documents & photos directly from your phone</p>
-          </div>
+          <!-- Top Decorative Corner Waves -->
+          <div class="standee-wave-top-left"></div>
+          <div class="standee-wave-top-right"></div>
 
-          <div class="standee-qr-frame">
-            <div class="standee-qr-quiet-zone">
-              <img id="qrImageDisplay" src="" alt="Customer Scan QR Code" class="standee-qr-img">
-            </div>
-          </div>
-
-          <div class="standee-instructions-box">
-            <div class="standee-step">
-              <span class="step-num">1</span>
-              <span class="step-text">Scan with phone</span>
-            </div>
-            <span class="step-arrow">→</span>
-            <div class="standee-step">
-              <span class="step-num">2</span>
-              <span class="step-text">Upload file</span>
-            </div>
-            <span class="step-arrow">→</span>
-            <div class="standee-step">
-              <span class="step-num">3</span>
-              <span class="step-text">Collect print</span>
+          <!-- 1. Header: Logo + Gaurprint (Gaur Black, print Blue, font Carbon) + Subtext -->
+          <div class="standee-marketing-header">
+            <div class="standee-brand-row">
+              <img src="logo.png" alt="Gaurprint Logo" class="standee-brand-logo" />
+              <div class="standee-brand-text-col">
+                <div class="standee-brand-title">
+                  <span class="brand-gaur">Gaur</span><span class="brand-print">print</span>
+                </div>
+                <div class="standee-brand-sub">Print &bull; Scan &bull; Copy &bull; More</div>
+              </div>
             </div>
           </div>
 
-          <div class="standee-shop-footer">
-            <div class="standee-shop-name" id="standeeShopNameDisplay">Mahadev Printer Shop</div>
-            <div class="standee-shop-url" id="qrUrlBadge">https://doc2print.vercel.app/kiosk/counter</div>
+          <!-- 2. Hero Headline: \ | / Scan to Print \ | / -->
+          <div class="standee-hero-callout">
+            <div class="standee-burst-title">
+              <svg class="burst-icon burst-left" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#00A3FF" stroke-width="2.6" stroke-linecap="round"><line x1="4" y1="12" x2="1" y2="12"/><line x1="6.5" y1="6.5" x2="3.5" y2="3.5"/><line x1="12" y1="4" x2="12" y2="1"/></svg>
+              <h2><span class="scan-txt">Scan to</span> <span class="print-txt">Print</span></h2>
+              <svg class="burst-icon burst-right" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#00A3FF" stroke-width="2.6" stroke-linecap="round"><line x1="20" y1="12" x2="23" y2="12"/><line x1="17.5" y1="6.5" x2="20.5" y2="3.5"/><line x1="12" y1="4" x2="12" y2="1"/></svg>
+            </div>
+            <p class="standee-hero-sub">Upload &bull; Customize &bull; Pay &bull; Print</p>
           </div>
+
+          <!-- 3. Rounded QR Box with embedded Logo in center -->
+          <div class="standee-qr-rounded-box">
+            <div class="standee-qr-inner-frame">
+              <img id="qrImageDisplay" src="" alt="Customer Scan QR Code" class="standee-qr-img" />
+              <div class="standee-qr-center-icon">
+                <img src="logo.png" alt="Gaurprint Mark" />
+              </div>
+            </div>
+          </div>
+
+          <!-- 4. Phone Instruction Banner -->
+          <div class="standee-instruction-banner">
+            <div class="instruction-phone-icon">
+              <svg width="22" height="30" viewBox="0 0 24 34" fill="none" stroke="#00A3FF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="2" y="2" width="20" height="30" rx="4" fill="#E0F2FE"/>
+                <circle cx="12" cy="27" r="1.5" fill="#00A3FF"/>
+                <line x1="9" y1="6" x2="15" y2="6" stroke="#00A3FF"/>
+              </svg>
+            </div>
+            <div class="instruction-divider"></div>
+            <div class="instruction-msg">Scan this QR code with your phone to start printing</div>
+          </div>
+
+          <!-- 5. 4 Feature Columns -->
+          <div class="standee-features-strip">
+            <div class="standee-feature-col">
+              <div class="feature-icon-badge">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#00A3FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3" ry="3"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+              </div>
+              <div class="feature-label">Photos</div>
+              <div class="feature-sub">(4&times;6, 5&times;7, etc.)</div>
+            </div>
+
+            <div class="standee-feature-col">
+              <div class="feature-icon-badge">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#00A3FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+              </div>
+              <div class="feature-label">Documents</div>
+              <div class="feature-sub">(PDF, DOC, etc.)</div>
+            </div>
+
+            <div class="standee-feature-col">
+              <div class="feature-icon-badge">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#00A3FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+              </div>
+              <div class="feature-label">Multiple Sizes</div>
+              <div class="feature-sub">(A4, A3, etc.)</div>
+            </div>
+
+            <div class="standee-feature-col">
+              <div class="feature-icon-badge">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#00A3FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>
+              </div>
+              <div class="feature-label">Safe &amp; Secure</div>
+              <div class="feature-sub">(Your files are private)</div>
+            </div>
+          </div>
+
+          <!-- 6. Shop Owner Footer Branding -->
+          <div class="standee-footer-section">
+            <div class="footer-shop-divider">
+              <span class="footer-line"></span>
+              <span class="standee-shop-name-title" id="standeeShopNameDisplay">Mahadev Printer Shop</span>
+              <span class="footer-line"></span>
+            </div>
+            <div class="standee-partner-tagline">Your Printing Partner</div>
+            <div class="standee-url-subtext" id="qrUrlBadge">https://doc2print.vercel.app/kiosk/counter</div>
+          </div>
+
+          <!-- Bottom Decorative Waves -->
+          <div class="standee-wave-bottom"></div>
         </div>
       </div>
       <div class="modal-footer qr-modal-footer">
@@ -1335,6 +1589,34 @@
         </button>
         <button class="btn btn-secondary btn-sm" id="btnCancelPrinterConfig">Cancel</button>
         <button class="btn btn-primary btn-sm" id="btnSavePrinterConfig">💾 Save Printer Profile</button>
+      </div>
+    </div>
+  <!-- ORDER AUDIT & TECHNICAL BREAKDOWN MODAL -->
+  <div class="modal-overlay" id="jobAuditModal">
+    <div class="modal-card audit-modal-card">
+      <div class="modal-header">
+        <div class="modal-title-group" style="display:flex; align-items:center; gap:10px;">
+          <div style="width:34px; height:34px; border-radius:8px; background:#EFF6FF; color:#2563EB; display:flex; align-items:center; justify-content:center; font-size:16px;">📄</div>
+          <div>
+            <h3 class="modal-title" id="auditModalTitle">Order Audit Record</h3>
+            <span class="modal-sub" id="auditModalSub">Verified technical & financial lifecycle record</span>
+          </div>
+        </div>
+        <button class="modal-close" id="btnCloseAuditModal">✕</button>
+      </div>
+
+      <div class="modal-body" id="auditModalBody" style="padding: 20px; max-height: 75vh; overflow-y: auto;">
+        <!-- Injected via JS -->
+      </div>
+
+      <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center;">
+        <div id="auditModalStorageNote" style="font-size:11.5px; color:var(--text-muted);">
+          Storage: <span id="auditStorageBadge" class="badge-chip grey">Checking...</span>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button class="btn btn-secondary btn-sm" id="btnAuditClose">Close</button>
+          <button class="btn btn-secondary btn-sm" id="btnAuditPreview">👁️ Preview Media</button>
+        </div>
       </div>
     </div>
   </div>

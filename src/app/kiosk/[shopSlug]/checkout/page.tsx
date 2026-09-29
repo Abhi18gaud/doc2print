@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { Shop } from '@/types/database';
 import { calculatePrintPrice, DEFAULT_PRICE_CONFIG } from '@/lib/price-calculator';
+import { clearPersistedKioskFiles } from '@/lib/kiosk-storage';
 
 interface FileConfig {
   name: string;
@@ -272,6 +273,15 @@ export default function KioskCheckoutPage() {
         });
       }
 
+      // Clear temporary files from IndexedDB upon successful order placement
+      try {
+        await clearPersistedKioskFiles(shopSlug);
+        sessionStorage.removeItem('qp_file_data');
+        sessionStorage.removeItem('qp_file_configs');
+      } catch (storageErr) {
+        console.warn('Failed clearing kiosk storage:', storageErr);
+      }
+
       // Navigate to live token queue page
       router.push(`/kiosk/${shopSlug}/token/${createdJob.id}`);
     } catch (err: unknown) {
@@ -391,15 +401,45 @@ export default function KioskCheckoutPage() {
                 <span className="font-medium text-[#1E293B] truncate max-w-[200px]">{fileName}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-slate-500">Format</span>
+                <span className="text-slate-500">Paper Size</span>
+                <span className="font-medium text-[#1E293B]">{paperSize?.toUpperCase()}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500">Orientation</span>
+                <span className="font-medium text-[#1E293B] capitalize">{orientation}</span>
+              </div>
+              {mode === 'photo' && photoSize && (
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">Photo Size</span>
+                  <span className="font-medium text-blue-600">
+                    {photoSize === 'passport'
+                      ? 'Passport (35 × 45 mm)'
+                      : photoSize === '4x6'
+                      ? '4 × 6 in (102 × 152 mm)'
+                      : photoSize === '5x7'
+                      ? '5 × 7 in (127 × 178 mm)'
+                      : photoSize === '6x8'
+                      ? '6 × 8 in (152 × 203 mm)'
+                      : photoSize.toUpperCase()}
+                  </span>
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500">Color Spectrum</span>
                 <span className="font-medium text-[#1E293B]">
-                  {mode === 'photo' ? `Photo · ${photoSize?.toUpperCase()}` : `${paperSize?.toUpperCase()} · ${colorMode === 'color' ? 'Color' : 'B&W'}`}
+                  {colorMode === 'color' ? 'Full Color' : 'Black & White (B&W)'}
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-slate-500">Sets & Sides</span>
+                <span className="text-slate-500">Print Sides</span>
                 <span className="font-medium text-[#1E293B]">
-                  {copies} {copies === 1 ? 'copy' : 'copies'} · {duplex ? 'Duplex 2-Sided' : 'Single-Sided'}
+                  {duplex ? 'Double-Sided (Duplex)' : 'Single-Sided'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500">Print Copies</span>
+                <span className="font-medium text-[#1E293B] font-mono font-bold">
+                  {copies} {copies === 1 ? 'copy' : 'copies'}
                 </span>
               </div>
               {(binding || stapling) && (
@@ -410,6 +450,15 @@ export default function KioskCheckoutPage() {
                   </span>
                 </div>
               )}
+              <div className="pt-2 border-t border-slate-200/80 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => router.push(`/kiosk/${shopSlug}`)}
+                  className="text-[12px] font-bold text-blue-600 hover:text-blue-700 hover:underline flex items-center gap-1"
+                >
+                  ✏️ Edit Print Options
+                </button>
+              </div>
             </div>
           )}
 

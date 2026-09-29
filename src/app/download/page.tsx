@@ -66,12 +66,12 @@ export default function DownloadPage() {
       <header className="border-b border-[#E2E8F0] bg-white sticky top-0 z-50">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-[#2563EB] text-white flex items-center justify-center font-extrabold text-sm">
-              QP
+            <div className="w-9 h-9 rounded-lg overflow-hidden flex items-center justify-center shadow-xs border border-[#E2E8F0] bg-white">
+              <img src="/logo.png" alt="Gaurprint" className="w-full h-full object-contain" />
             </div>
             <div className="flex items-center gap-1.5">
-              <span className="font-extrabold text-[19px] tracking-tight text-[#0F172A]">
-                QuickPrint
+              <span className="font-extrabold text-[20px] tracking-tight">
+                <span className="text-[#0F172A]">Gaur</span><span className="text-[#0284C7]">print</span>
               </span>
               <span className="text-[11px] font-semibold text-[#64748B] tracking-wide ml-1 px-2 py-0.5 rounded bg-[#F1F5F9] border border-[#E2E8F0]">
                 COUNTER OS

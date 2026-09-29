@@ -18,8 +18,13 @@ const spaceMono = Space_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "QuickPrint - Automated Counter Print Kiosk",
+  title: "Gaurprint - Automated Counter Print Kiosk",
   description: "Scan QR at the Xerox counter, upload and customize your print, pay online or cash, and collect your physical prints in seconds.",
+  icons: {
+    icon: "/logo.png",
+    shortcut: "/logo.png",
+    apple: "/logo.png",
+  },
 };
 
 export default function RootLayout({

@@ -21,10 +21,19 @@ import {
   RotateCw,
   Image as ImageIcon,
   ScanLine,
+  Edit3,
+  Eye,
 } from 'lucide-react';
 import { inspectUploadedFile, formatBytes } from '@/lib/pdf-inspector';
 import { calculatePrintPrice, DEFAULT_PRICE_CONFIG, PriceCalculationResult } from '@/lib/price-calculator';
 import { Shop } from '@/types/database';
+import PrintStudio, { ImageEditState } from '@/components/PrintStudio';
+import {
+  persistKioskFiles,
+  restoreKioskFiles,
+  removePersistedKioskFile,
+  clearPersistedKioskFiles,
+} from '@/lib/kiosk-storage';
 
 export interface FileItem {
   id: string;
@@ -50,6 +59,11 @@ export interface FileItem {
   // Common attributes
   orientation: 'portrait' | 'landscape';
   copies: number;
+  fitMode?: 'fit' | 'fill' | 'actual';
+  pdfPageRotations?: Record<number, number>;
+  // Print Studio attributes
+  renderedDataUrl?: string;
+  editState?: ImageEditState;
 }
 
 export default function KioskUploadPage() {
@@ -109,6 +123,32 @@ export default function KioskUploadPage() {
     }
     loadShop();
   }, [shopSlug]);
+
+  // Restore persisted files from IndexedDB across page reloads
+  useEffect(() => {
+    let isMounted = true;
+    async function initRestoredFiles() {
+      try {
+        const restored = await restoreKioskFiles(shopSlug);
+        if (isMounted && restored && restored.length > 0) {
+          setFiles(restored);
+        }
+      } catch (err) {
+        console.warn('Failed restoring files from storage:', err);
+      }
+    }
+    initRestoredFiles();
+    return () => {
+      isMounted = false;
+    };
+  }, [shopSlug]);
+
+  // Sync files to IndexedDB whenever files state changes
+  useEffect(() => {
+    if (files.length > 0) {
+      persistKioskFiles(shopSlug, files);
+    }
+  }, [files, shopSlug]);
 
   const priceCfg = shop?.price_config || DEFAULT_PRICE_CONFIG;
 
@@ -214,6 +254,10 @@ export default function KioskUploadPage() {
       }
 
       setFiles((prev) => [...prev, ...newItems]);
+      if (newItems.length > 0) {
+        setActiveEditingFileId(newItems[0].id);
+        setActivePreviewPageIndex(0);
+      }
     } catch (err) {
       console.error('Failed to parse uploaded files:', err);
     } finally {
@@ -221,9 +265,16 @@ export default function KioskUploadPage() {
     }
   };
 
-  const removeFile = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setFiles((prev) => prev.filter((item) => item.id !== id));
+  const removeFile = async (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setFiles((prev) => {
+      const next = prev.filter((item) => item.id !== id);
+      if (next.length === 0) {
+        clearPersistedKioskFiles(shopSlug);
+      }
+      return next;
+    });
+    await removePersistedKioskFile(id);
     if (activeEditingFileId === id) {
       setActiveEditingFileId(null);
     }
@@ -251,7 +302,7 @@ export default function KioskUploadPage() {
 
     setIsProcessingUpload(true);
     try {
-      const { PDFDocument } = await import('pdf-lib');
+      const { PDFDocument, degrees } = await import('pdf-lib');
       const masterPdf = await PDFDocument.create();
 
       for (const item of files) {
@@ -268,34 +319,119 @@ export default function KioskUploadPage() {
             const pagesToCopy =
               validPageIndices.length > 0 ? validPageIndices : donorPdf.getPageIndices();
             const copiedPages = await masterPdf.copyPages(donorPdf, pagesToCopy);
-            copiedPages.forEach((p) => masterPdf.addPage(p));
-          } else if (cleanName.endsWith('.png')) {
-            const pngImage = await masterPdf.embedPng(buffer);
-            const a4Width = 595.28;
-            const a4Height = 841.89;
-            const page = masterPdf.addPage([a4Width, a4Height]);
-            const margin = 36;
-            const dims = pngImage.scaleToFit(a4Width - margin * 2, a4Height - margin * 2);
-            page.drawImage(pngImage, {
-              x: margin + (a4Width - margin * 2 - dims.width) / 2,
-              y: margin + (a4Height - margin * 2 - dims.height) / 2,
-              width: dims.width,
-              height: dims.height,
+            copiedPages.forEach((p, idx) => {
+              const pageNum = (item.selectedPages || [])[idx] || (idx + 1);
+              const rot = (item.pdfPageRotations?.[pageNum] || 0) % 360;
+              if (rot !== 0) {
+                p.setRotation(degrees((p.getRotation().angle + rot) % 360));
+              }
+              masterPdf.addPage(p);
             });
           } else {
-            // JPG, JPEG, WEBP
-            const jpgImage = await masterPdf.embedJpg(buffer);
-            const a4Width = 595.28;
-            const a4Height = 841.89;
-            const page = masterPdf.addPage([a4Width, a4Height]);
-            const margin = 36;
-            const dims = jpgImage.scaleToFit(a4Width - margin * 2, a4Height - margin * 2);
-            page.drawImage(jpgImage, {
-              x: margin + (a4Width - margin * 2 - dims.width) / 2,
-              y: margin + (a4Height - margin * 2 - dims.height) / 2,
-              width: dims.width,
-              height: dims.height,
-            });
+            // PNG, JPG, JPEG, WEBP, or Photo Print
+            let imageBytes: Uint8Array;
+            let isPng = false;
+
+            if (item.renderedDataUrl) {
+              const res = await fetch(item.renderedDataUrl);
+              const blob = await res.blob();
+              const arrayBuf = await blob.arrayBuffer();
+              imageBytes = new Uint8Array(arrayBuf);
+              isPng = item.renderedDataUrl.startsWith('data:image/png');
+            } else {
+              const arrayBuf = await item.file.arrayBuffer();
+              imageBytes = new Uint8Array(arrayBuf);
+              isPng = cleanName.endsWith('.png');
+            }
+
+            const embeddedImage = isPng
+              ? await masterPdf.embedPng(imageBytes)
+              : await masterPdf.embedJpg(imageBytes);
+
+            // Determine page dimensions in PDF points (1 mm = 2.83465 pt)
+            // A4: 210 x 297 mm = 595.28 x 841.89 pt
+            // A3: 297 x 420 mm = 841.89 x 1190.55 pt
+            // Legal: 216 x 356 mm = 612.0 x 1008.0 pt
+            let pageWidth = 595.28;
+            let pageHeight = 841.89;
+            const paperLower = (item.paperSize || 'a4').toLowerCase();
+            if (paperLower === 'a3') {
+              pageWidth = 841.89;
+              pageHeight = 1190.55;
+            } else if (paperLower === 'legal') {
+              pageWidth = 612.0;
+              pageHeight = 1008.0;
+            }
+
+            if (item.orientation === 'landscape') {
+              const tmp = pageWidth;
+              pageWidth = pageHeight;
+              pageHeight = tmp;
+            }
+
+            const page = masterPdf.addPage([pageWidth, pageHeight]);
+
+            // Layout based on print mode:
+            if (item.mode === 'photo' && item.photoSize === 'passport') {
+              // Passport Multi-Photo Grid (35mm x 45mm = 99.2 pt x 127.5 pt)
+              const pw = 99.2;
+              const ph = 127.5;
+              const marginX = 40;
+              const marginY = 50;
+              const gapX = 14;
+              const gapY = 16;
+              const cols = 4;
+              const count = Math.min(16, Math.max(1, item.copies || 8));
+
+              for (let c = 0; c < count; c++) {
+                const colIdx = c % cols;
+                const rowIdx = Math.floor(c / cols);
+                const x = marginX + colIdx * (pw + gapX);
+                const y = pageHeight - marginY - (rowIdx + 1) * ph - rowIdx * gapY;
+
+                page.drawImage(embeddedImage, {
+                  x,
+                  y,
+                  width: pw,
+                  height: ph,
+                });
+              }
+            } else if (item.mode === 'photo' && item.photoSize !== 'a4_photo') {
+              // Standard photo (4x6, 5x7, 6x8) centered on sheet
+              let photoW = 288; // 4 in = 288 pt
+              let photoH = 432; // 6 in = 432 pt
+              if (item.photoSize === '5x7') {
+                photoW = 360;
+                photoH = 504;
+              } else if (item.photoSize === '6x8') {
+                photoW = 432;
+                photoH = 576;
+              }
+              if (item.orientation === 'landscape') {
+                const tmp = photoW;
+                photoW = photoH;
+                photoH = tmp;
+              }
+
+              const x = (pageWidth - photoW) / 2;
+              const y = (pageHeight - photoH) / 2;
+              page.drawImage(embeddedImage, {
+                x,
+                y,
+                width: photoW,
+                height: photoH,
+              });
+            } else {
+              // Full page image / A4 photo print
+              const margin = 36;
+              const dims = embeddedImage.scaleToFit(pageWidth - margin * 2, pageHeight - margin * 2);
+              page.drawImage(embeddedImage, {
+                x: margin + (pageWidth - margin * 2 - dims.width) / 2,
+                y: margin + (pageHeight - margin * 2 - dims.height) / 2,
+                width: dims.width,
+                height: dims.height,
+              });
+            }
           }
         }
       }
@@ -623,14 +759,15 @@ export default function KioskUploadPage() {
                     }}
                     className="w-[145px] shrink-0 bg-white border border-[#E2E8F0] rounded-[16px] overflow-hidden flex flex-col justify-between cursor-pointer hover:border-blue-400 hover:shadow-sm transition-all group relative snap-start"
                   >
-                    {/* Delete Button on Hover */}
+                    {/* Always-Visible Accessible Delete Button */}
                     <button
                       type="button"
                       onClick={(e) => removeFile(item.id, e)}
-                      className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/60 text-white flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity z-10 hover:bg-red-600"
+                      className="absolute top-2 right-2 w-7 h-7 rounded-full bg-red-600 hover:bg-red-700 text-white flex items-center justify-center shadow-md z-10 active:scale-95 transition-all"
                       title="Remove File"
+                      aria-label="Remove File"
                     >
-                      ×
+                      <Trash2 className="w-3.5 h-3.5" />
                     </button>
 
                      {/* Thumbnail Preview Area */}
@@ -653,9 +790,9 @@ export default function KioskUploadPage() {
                           </svg>
                           <span className="text-[9px] font-bold text-blue-500 uppercase tracking-wider">WORD</span>
                         </div>
-                      ) : item.previewUrl ? (
+                      ) : (item.renderedDataUrl || item.previewUrl) ? (
                         <img
-                          src={item.previewUrl}
+                          src={item.renderedDataUrl || item.previewUrl}
                           alt={item.name}
                           className="w-full h-full object-cover object-top opacity-95"
                           style={{ filter: isBw ? 'grayscale(100%)' : 'none' }}
@@ -717,6 +854,34 @@ export default function KioskUploadPage() {
                           ₹{calc.total.toFixed(0)}
                         </span>
                       </div>
+
+                      {/* Quick Action Chips: Edit & Preview */}
+                      <div className="flex items-center gap-1 pt-1.5 border-t border-slate-100">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveEditingFileId(item.id);
+                            setActivePreviewPageIndex(0);
+                          }}
+                          className="flex-1 py-1 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold flex items-center justify-center gap-1 transition-colors"
+                        >
+                          <Eye className="w-3 h-3 text-slate-500" />
+                          <span>Preview</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveEditingFileId(item.id);
+                            setActivePreviewPageIndex(0);
+                          }}
+                          className="flex-1 py-1 rounded-md bg-blue-50 hover:bg-blue-100 text-blue-700 text-[10px] font-bold flex items-center justify-center gap-1 transition-colors"
+                        >
+                          <Edit3 className="w-3 h-3 text-blue-600" />
+                          <span>{item.type === 'pdf' ? 'Prepare' : 'Edit'}</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
                 );
@@ -750,27 +915,45 @@ export default function KioskUploadPage() {
                 const isColor = item.colorMode === 'color';
 
                 return (
-                  <div key={item.id} className="flex items-center justify-between text-[12px]">
-                    <div className="flex items-center gap-2 max-w-[280px]">
+                  <div key={item.id} className="flex items-center justify-between text-[12px] py-1 border-b border-slate-100/80 last:border-b-0">
+                    <div className="flex items-center gap-2 max-w-[240px]">
                       <span
-                        className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                        className={`w-2 h-2 rounded-full shrink-0 ${
                           isColor ? 'bg-[#0EA5E9]' : 'bg-[#94A3B8]'
                         }`}
                       />
-                      <span
-                        className="truncate text-[#1E293B]"
-                        style={{ fontFamily: "'ABeeZee', sans-serif" }}
-                        title={item.name}
-                      >
-                        {item.name}
-                      </span>
+                      <div className="flex flex-col">
+                        <span
+                          className="truncate text-[#1E293B] font-medium"
+                          style={{ fontFamily: "'ABeeZee', sans-serif" }}
+                          title={item.name}
+                        >
+                          {item.name}
+                        </span>
+                        <span className="text-[10px] text-slate-400">
+                          {item.mode === 'photo' ? 'Photo Print' : item.mode === 'image' ? 'Image Print' : 'Document'} · {item.copies} {item.copies === 1 ? 'copy' : 'copies'}
+                        </span>
+                      </div>
                     </div>
-                    <span
-                      className="font-normal text-[#1E293B] font-mono shrink-0"
-                      style={{ fontFamily: "'ABeeZee', sans-serif" }}
-                    >
-                      ₹{calc.total.toFixed(0)}
-                    </span>
+                    <div className="flex items-center gap-2.5">
+                      <span
+                        className="font-bold text-[#1E293B] font-mono shrink-0"
+                        style={{ fontFamily: "'ABeeZee', sans-serif" }}
+                      >
+                        ₹{calc.total.toFixed(0)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeFile(item.id);
+                        }}
+                        className="w-7 h-7 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 flex items-center justify-center transition-colors"
+                        title="Remove file"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
                 );
               })
@@ -804,608 +987,17 @@ export default function KioskUploadPage() {
         </div>
 
         {/* ========================================================================= */}
-        {/* PREVIEW & CONFIGURATION MODAL / BOTTOM SHEET (Document & Photo Modes) */}
+        {/* GAURPRINT PRINT STUDIO (UNIFIED FOR PHOTO, IMAGE & DOCUMENT PREPARATION) */}
         {/* ========================================================================= */}
-        {activeEditingFile && activeCalculation && (
-          <div className="fixed inset-0 z-50 flex flex-col justify-end bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
-            <div className="w-full max-w-[440px] mx-auto h-[95vh] bg-[#FFFFFF] rounded-t-[28px] overflow-hidden flex flex-col shadow-2xl animate-in slide-in-from-bottom duration-300">
-              {/* Header Bar */}
-              <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActiveEditingFileId(null);
-                    setShowPageRangeModal(false);
-                  }}
-                  className="p-1 rounded-full text-slate-700 hover:bg-slate-100 flex items-center gap-1 text-[15px]"
-                >
-                  <ChevronLeft className="w-6 h-6 text-slate-800" />
-                </button>
-                <div className="text-center">
-                  <h3 className="text-[16px] font-semibold text-slate-900">Print Preview</h3>
-                  <span className="text-[10px] text-slate-500 font-mono">{activeEditingFile.name}</span>
-                </div>
-
-                {/* Mode Switch */}
-                <select
-                  value={activeEditingFile.mode}
-                  onChange={(e) => {
-                    const newMode = e.target.value as 'document' | 'photo' | 'image';
-                    updateActiveEditingFile({
-                      mode: newMode,
-                      colorMode: newMode === 'photo' ? 'color' : activeEditingFile.colorMode,
-                    });
-                  }}
-                  className="text-[11px] font-semibold px-2 py-1 rounded-md bg-slate-100 hover:bg-slate-200 text-blue-600 border border-slate-200 outline-none cursor-pointer"
-                >
-                  <option value="document">📄 Document</option>
-                  <option value="image">🖼️ Image</option>
-                  <option value="photo">📸 Photo Print</option>
-                </select>
-              </div>
-
-              {/* Document Preview Viewport with Real-Time Dynamic Aspect Ratio & Visual Filters */}
-              <div className="flex-1 bg-slate-100 relative flex flex-col items-center justify-center p-4 overflow-hidden">
-                {/* Responsive Aspect-Ratio Container */}
-                <div
-                  className={`max-w-[300px] max-h-[300px] w-full bg-white rounded-lg shadow-md border-2 border-slate-300 overflow-hidden relative flex flex-col items-center justify-center transition-all duration-300 ${
-                    activeEditingFile.mode === 'photo'
-                      ? activeEditingFile.photoSize === 'passport'
-                        ? 'aspect-square'
-                        : activeEditingFile.photoSize === '5x7'
-                        ? activeEditingFile.orientation === 'landscape' ? 'aspect-[7/5]' : 'aspect-[5/7]'
-                        : activeEditingFile.photoSize === '6x8'
-                        ? activeEditingFile.orientation === 'landscape' ? 'aspect-[8/6]' : 'aspect-[6/8]'
-                        : activeEditingFile.orientation === 'landscape' ? 'aspect-[6/4]' : 'aspect-[4/6]'
-                      : activeEditingFile.orientation === 'landscape' ? 'aspect-[1.414/1]' : 'aspect-[1/1.414]'
-                  }`}
-                >
-                  {activeEditingFile.previewUrl ? (
-                    // PDF files: use iframe to render actual content
-                    // Image/Photo files: use img tag
-                    activeEditingFile.type === 'pdf' ? (
-                      <iframe
-                        src={`${activeEditingFile.previewUrl}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`}
-                        className="w-full h-full border-0 pointer-events-none"
-                        title={activeEditingFile.name}
-                        style={{
-                          filter: activeEditingFile.colorMode === 'bw' ? 'grayscale(100%)' : 'none',
-                        }}
-                      />
-                    ) : activeEditingFile.type === 'doc' ? (
-                      // Word/Doc files can't render in browser
-                      <div className="w-full h-full flex flex-col items-center justify-center bg-blue-50/60 text-blue-400 gap-3">
-                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-blue-500">
-                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                          <polyline points="14 2 14 8 20 8" />
-                          <line x1="16" y1="13" x2="8" y2="13" />
-                          <line x1="16" y1="17" x2="8" y2="17" />
-                        </svg>
-                        <span className="text-[11px] font-semibold text-blue-500 text-center px-3">{activeEditingFile.name}</span>
-                        <span className="text-[10px] text-blue-400">{activeEditingFile.pages} {activeEditingFile.pages === 1 ? 'page' : 'pages'}</span>
-                      </div>
-                    ) : (
-                      <img
-                        src={activeEditingFile.previewUrl}
-                        alt="Preview"
-                        className="w-full h-full object-contain transition-all"
-                        style={{
-                          filter: activeEditingFile.colorMode === 'bw' ? 'grayscale(100%)' : 'none',
-                        }}
-                      />
-                    )
-                  ) : (
-                    <div className="text-center p-6 text-slate-400">
-                      <FileText className="w-16 h-16 mx-auto mb-2 text-slate-300" />
-                      <p className="text-xs font-mono">{activeEditingFile.name}</p>
-                    </div>
-                  )}
-
-                  {/* Top HUD Badges */}
-                  <div className="absolute top-2 left-2 px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-black/75 text-white backdrop-blur-xs shadow-xs">
-                    {activeEditingFile.colorMode === 'bw' ? 'B&W Grayscale' : 'Full Color'}
-                  </div>
-                  <div className="absolute top-2 right-2 px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-blue-600 text-white shadow-xs">
-                    {activeEditingFile.mode === 'photo'
-                      ? activeEditingFile.photoSize.toUpperCase()
-                      : activeEditingFile.paperSize.toUpperCase()}
-                  </div>
-
-                  {/* Bottom HUD Badges */}
-                  <div className="absolute bottom-2 left-2 px-2 py-0.5 rounded text-[9px] font-medium bg-white/90 text-slate-800 border border-slate-300 shadow-xs">
-                    {activeEditingFile.orientation === 'landscape' ? 'Landscape' : 'Portrait'} •{' '}
-                    {activeEditingFile.mode === 'photo'
-                      ? activeEditingFile.photoPaper
-                      : activeEditingFile.paperType}
-                  </div>
-
-                  {activeEditingFile.mode === 'document' && activeEditingFile.sides === 'duplex' && (
-                    <div className="absolute bottom-2 right-2 px-2 py-0.5 rounded text-[9px] font-bold bg-amber-500 text-white shadow-xs">
-                      Duplex (2-Sided)
-                    </div>
-                  )}
-                </div>
-
-                {/* Page Navigation for Multi-page Documents */}
-                {activeEditingFile.pages > 1 && (
-                  <div className="flex items-center gap-4 mt-3">
-                    <button
-                      type="button"
-                      onClick={() => setActivePreviewPageIndex((p) => Math.max(0, p - 1))}
-                      disabled={activePreviewPageIndex === 0}
-                      className="p-1 text-slate-600 disabled:opacity-30"
-                    >
-                      <ChevronLeft className="w-5 h-5" />
-                    </button>
-                    <span className="text-[13px] font-medium text-slate-700">
-                      Page {activePreviewPageIndex + 1} of {activeEditingFile.pages}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setActivePreviewPageIndex((p) =>
-                          Math.min((activeEditingFile.pages || 1) - 1, p + 1)
-                        )
-                      }
-                      disabled={activePreviewPageIndex >= (activeEditingFile.pages || 1) - 1}
-                      className="p-1 text-slate-600 disabled:opacity-30"
-                    >
-                      <ChevronRight className="w-5 h-5" />
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* iOS BOTTOM SHEET DRAWER (Dynamic Print Configuration & Real-Time Price) */}
-              <div className="bg-white px-5 pt-3 pb-6 rounded-t-[24px] shadow-[0_-4px_20px_rgba(0,0,0,0.06)] border-t border-slate-100 flex flex-col gap-3 overflow-y-auto max-h-[52vh]">
-                <div className="w-10 h-1 bg-slate-300 rounded-full mx-auto mb-1" />
-
-                {/* Real-Time Price Strip with Itemized Breakdown */}
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex flex-col gap-1.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[13px] font-bold text-slate-800">
-                      Calculated Price ({activeEditingFile.copies} {activeEditingFile.copies === 1 ? 'Copy' : 'Copies'})
-                    </span>
-                    <span className="text-[17px] font-black text-blue-600 font-mono">
-                      ₹{activeCalculation.total.toFixed(2)}
-                    </span>
-                  </div>
-
-                  <div className="text-[11px] text-slate-500 flex flex-col gap-0.5 border-t border-slate-200 pt-1.5">
-                    {activeCalculation.items.map((it, idx) => (
-                      <div key={idx} className="flex justify-between">
-                        <span>{it.label}</span>
-                        <span className="font-mono">₹{it.amount.toFixed(2)}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* ============================================================== */}
-                {/* IMAGE MODE OPTIONS (plain paper, no photo paper) */}
-                {/* ============================================================== */}
-                {activeEditingFile.mode === 'image' ? (
-                  <>
-                    {/* Paper Size */}
-                    <div className="flex items-center justify-between py-1 border-b border-slate-100">
-                      <span className="text-[14px] font-medium text-slate-900">Paper Size</span>
-                      <select
-                        value={activeEditingFile.paperSize}
-                        onChange={(e) => updateActiveEditingFile({ paperSize: e.target.value })}
-                        className="text-[14px] text-slate-700 bg-transparent text-right outline-none cursor-pointer font-medium"
-                      >
-                        {Object.entries(priceCfg.paperSizes || DEFAULT_PRICE_CONFIG.paperSizes || {})
-                          .filter(([_, opt]) => opt.enabled !== false)
-                          .map(([key, opt]) => (
-                            <option key={key} value={key}>
-                              {opt.name} {opt.extra > 0 ? `(+₹${opt.extra})` : ''}
-                            </option>
-                          ))}
-                      </select>
-                    </div>
-
-                    {/* Color Options */}
-                    <div className="flex items-center justify-between py-1 border-b border-slate-100">
-                      <span className="text-[14px] font-medium text-slate-900">Color Options</span>
-                      <select
-                        value={activeEditingFile.colorMode}
-                        onChange={(e) => updateActiveEditingFile({ colorMode: e.target.value as 'bw' | 'color' })}
-                        className="text-[14px] text-slate-700 bg-transparent text-right outline-none cursor-pointer font-medium"
-                      >
-                        <option value="bw">Black & White (B&W)</option>
-                        <option value="color">Full Color</option>
-                      </select>
-                    </div>
-
-                    {/* Paper Type */}
-                    <div className="flex items-center justify-between py-1 border-b border-slate-100">
-                      <span className="text-[14px] font-medium text-slate-900">Paper Type</span>
-                      <select
-                        value={activeEditingFile.paperType}
-                        onChange={(e) => updateActiveEditingFile({ paperType: e.target.value })}
-                        className="text-[14px] text-slate-700 bg-transparent text-right outline-none cursor-pointer font-medium"
-                      >
-                        {Object.entries(priceCfg.paperTypes || DEFAULT_PRICE_CONFIG.paperTypes || {})
-                          .filter(([_, opt]) => opt.enabled !== false)
-                          .map(([key, opt]) => (
-                            <option key={key} value={key}>
-                              {opt.name} {opt.extra > 0 ? `(+₹${opt.extra})` : ''}
-                            </option>
-                          ))}
-                      </select>
-                    </div>
-
-                    {/* Orientation */}
-                    <div className="flex items-center justify-between py-1 border-b border-slate-100">
-                      <span className="text-[14px] font-medium text-slate-900">Orientation</span>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => updateActiveEditingFile({ orientation: 'portrait' })}
-                          className={`text-xs px-2.5 py-1 rounded font-semibold transition-all ${
-                            activeEditingFile.orientation === 'portrait' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'
-                          }`}
-                        >
-                          Portrait
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => updateActiveEditingFile({ orientation: 'landscape' })}
-                          className={`text-xs px-2.5 py-1 rounded font-semibold transition-all ${
-                            activeEditingFile.orientation === 'landscape' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'
-                          }`}
-                        >
-                          Landscape
-                        </button>
-                      </div>
-                    </div>
-                    {/* Info note */}
-                    <p className="text-[11px] text-slate-400 px-1">ℹ️ Image will be centered and scaled to fit the selected paper size.</p>
-                  </>
-                ) : activeEditingFile.mode === 'photo' ? (
-                  <>
-                {/* ============================================================== */}
-                {/* PHOTO MODE OPTIONS */}
-                {/* ============================================================== */}
-                    {/* Photo Size */}
-                    <div className="flex items-center justify-between py-1 border-b border-slate-100">
-                      <span className="text-[14px] font-medium text-slate-900">Photo Size</span>
-                      <select
-                        value={activeEditingFile.photoSize}
-                        onChange={(e) => updateActiveEditingFile({ photoSize: e.target.value })}
-                        className="text-[14px] text-slate-700 bg-transparent text-right outline-none cursor-pointer font-medium"
-                      >
-                        {Object.entries(priceCfg.photoSizes || DEFAULT_PRICE_CONFIG.photoSizes || {}).map(
-                          ([key, opt]) => (
-                            <option key={key} value={key}>
-                              {opt.name} (₹{opt.price})
-                            </option>
-                          )
-                        )}
-                      </select>
-                    </div>
-
-                    {/* Photo Paper */}
-                    <div className="flex items-center justify-between py-1 border-b border-slate-100">
-                      <span className="text-[14px] font-medium text-slate-900">Photo Paper</span>
-                      <select
-                        value={activeEditingFile.photoPaper}
-                        onChange={(e) => updateActiveEditingFile({ photoPaper: e.target.value })}
-                        className="text-[14px] text-slate-700 bg-transparent text-right outline-none cursor-pointer font-medium"
-                      >
-                        {Object.entries(priceCfg.photoPapers || DEFAULT_PRICE_CONFIG.photoPapers || {}).map(
-                          ([key, opt]) => (
-                            <option key={key} value={key}>
-                              {opt.name} {opt.extra > 0 ? `(+₹${opt.extra})` : ''}
-                            </option>
-                          )
-                        )}
-                      </select>
-                    </div>
-
-                    {/* Photo Quality */}
-                    <div className="flex items-center justify-between py-1 border-b border-slate-100">
-                      <span className="text-[14px] font-medium text-slate-900">Quality</span>
-                      <select
-                        value={activeEditingFile.photoQuality}
-                        onChange={(e) => updateActiveEditingFile({ photoQuality: e.target.value })}
-                        className="text-[14px] text-slate-700 bg-transparent text-right outline-none cursor-pointer font-medium"
-                      >
-                        {Object.entries(priceCfg.photoQualities || DEFAULT_PRICE_CONFIG.photoQualities || {}).map(
-                          ([key, opt]) => (
-                            <option key={key} value={key}>
-                              {opt.name} {opt.extra > 0 ? `(+₹${opt.extra})` : ''}
-                            </option>
-                          )
-                        )}
-                      </select>
-                    </div>
-
-                    {/* Orientation */}
-                    <div className="flex items-center justify-between py-1 border-b border-slate-100">
-                      <span className="text-[14px] font-medium text-slate-900">Orientation</span>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => updateActiveEditingFile({ orientation: 'portrait' })}
-                          className={`text-xs px-2.5 py-1 rounded font-semibold transition-all ${
-                            activeEditingFile.orientation === 'portrait'
-                              ? 'bg-blue-600 text-white'
-                              : 'bg-slate-100 text-slate-600'
-                          }`}
-                        >
-                          Portrait
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => updateActiveEditingFile({ orientation: 'landscape' })}
-                          className={`text-xs px-2.5 py-1 rounded font-semibold transition-all ${
-                            activeEditingFile.orientation === 'landscape'
-                              ? 'bg-blue-600 text-white'
-                              : 'bg-slate-100 text-slate-600'
-                          }`}
-                        >
-                          Landscape
-                        </button>
-                      </div>
-                    </div>
-                  </>
-                ) : null}
-                {activeEditingFile.mode === 'photo' ? null : activeEditingFile.mode === 'image' ? null : (
-                  /* ============================================================== */
-                  /* DOCUMENT MODE OPTIONS */
-                  /* ============================================================== */
-                  <>
-                    {/* Paper Size */}
-                    <div className="flex items-center justify-between py-1 border-b border-slate-100">
-                      <span className="text-[14px] font-medium text-slate-900">Paper Size</span>
-                      <select
-                        value={activeEditingFile.paperSize}
-                        onChange={(e) => updateActiveEditingFile({ paperSize: e.target.value })}
-                        className="text-[14px] text-slate-700 bg-transparent text-right outline-none cursor-pointer font-medium"
-                      >
-                        {Object.entries(priceCfg.paperSizes || DEFAULT_PRICE_CONFIG.paperSizes || {})
-                          .filter(([_, opt]) => opt.enabled !== false)
-                          .map(([key, opt]) => (
-                            <option key={key} value={key}>
-                              {opt.name} {opt.extra > 0 ? `(+₹${opt.extra})` : ''}
-                            </option>
-                          ))}
-                      </select>
-                    </div>
-
-                    {/* Paper Type */}
-                    <div className="flex items-center justify-between py-1 border-b border-slate-100">
-                      <span className="text-[14px] font-medium text-slate-900">Paper Type</span>
-                      <select
-                        value={activeEditingFile.paperType}
-                        onChange={(e) => updateActiveEditingFile({ paperType: e.target.value })}
-                        className="text-[14px] text-slate-700 bg-transparent text-right outline-none cursor-pointer font-medium"
-                      >
-                        {Object.entries(priceCfg.paperTypes || DEFAULT_PRICE_CONFIG.paperTypes || {})
-                          .filter(([_, opt]) => opt.enabled !== false)
-                          .map(([key, opt]) => (
-                            <option key={key} value={key}>
-                              {opt.name} {opt.extra > 0 ? `(+₹${opt.extra})` : ''}
-                            </option>
-                          ))}
-                      </select>
-                    </div>
-
-                    {/* Color Options */}
-                    <div className="flex items-center justify-between py-1 border-b border-slate-100">
-                      <span className="text-[14px] font-medium text-slate-900">Color Options</span>
-                      <select
-                        value={activeEditingFile.colorMode}
-                        onChange={(e) =>
-                          updateActiveEditingFile({ colorMode: e.target.value as 'bw' | 'color' })
-                        }
-                        className="text-[14px] text-slate-700 bg-transparent text-right outline-none cursor-pointer font-medium"
-                      >
-                        <option value="bw">Black & White (B&W)</option>
-                        <option value="color">Full Color</option>
-                      </select>
-                    </div>
-
-                    {/* Print Sides (Single / Duplex) - Immediate price recalculation */}
-                    <div className="flex items-center justify-between py-1 border-b border-slate-100">
-                      <span className="text-[14px] font-medium text-slate-900">Print Sides</span>
-                      <select
-                        value={activeEditingFile.sides}
-                        onChange={(e) =>
-                          updateActiveEditingFile({ sides: e.target.value as 'single' | 'duplex' })
-                        }
-                        className="text-[14px] text-slate-700 bg-transparent text-right outline-none cursor-pointer font-medium"
-                      >
-                        <option value="single">Single-Sided (1-Sided)</option>
-                        <option value="duplex">Double-Sided (2-Sided / Duplex)</option>
-                      </select>
-                    </div>
-
-                    {/* Quality */}
-                    <div className="flex items-center justify-between py-1 border-b border-slate-100">
-                      <span className="text-[14px] font-medium text-slate-900">Quality</span>
-                      <select
-                        value={activeEditingFile.quality}
-                        onChange={(e) => updateActiveEditingFile({ quality: e.target.value })}
-                        className="text-[14px] text-slate-700 bg-transparent text-right outline-none cursor-pointer font-medium"
-                      >
-                        {Object.entries(priceCfg.qualities || DEFAULT_PRICE_CONFIG.qualities || {})
-                          .filter(([_, opt]) => opt.enabled !== false)
-                          .map(([key, opt]) => (
-                            <option key={key} value={key}>
-                              {opt.name} {opt.extra > 0 ? `(+₹${opt.extra})` : ''}
-                            </option>
-                          ))}
-                      </select>
-                    </div>
-
-                    {/* Orientation */}
-                    <div className="flex items-center justify-between py-1 border-b border-slate-100">
-                      <span className="text-[14px] font-medium text-slate-900">Orientation</span>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => updateActiveEditingFile({ orientation: 'portrait' })}
-                          className={`text-xs px-2.5 py-1 rounded font-semibold transition-all ${
-                            activeEditingFile.orientation === 'portrait'
-                              ? 'bg-blue-600 text-white'
-                              : 'bg-slate-100 text-slate-600'
-                          }`}
-                        >
-                          Portrait
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => updateActiveEditingFile({ orientation: 'landscape' })}
-                          className={`text-xs px-2.5 py-1 rounded font-semibold transition-all ${
-                            activeEditingFile.orientation === 'landscape'
-                              ? 'bg-blue-600 text-white'
-                              : 'bg-slate-100 text-slate-600'
-                          }`}
-                        >
-                          Landscape
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Page Range */}
-                    <div
-                      onClick={() => setShowPageRangeModal(true)}
-                      className="flex items-center justify-between py-1 border-b border-slate-100 cursor-pointer hover:bg-slate-50 px-1 -mx-1 rounded"
-                    >
-                      <span className="text-[14px] font-medium text-slate-900">Page Range</span>
-                      <div className="flex items-center gap-1 text-[14px] text-slate-700 font-medium">
-                        <span>
-                          {activeEditingFile.selectedPages.length === activeEditingFile.pages
-                            ? 'All Pages'
-                            : `${activeEditingFile.selectedPages.length} Selected`}
-                        </span>
-                        <ChevronRight className="w-4 h-4 text-slate-400" />
-                      </div>
-                    </div>
-                  </>
-                )}
-
-                {/* Copies Counter */}
-                <div className="flex items-center justify-between py-1 border-b border-slate-100">
-                  <span className="text-[14px] font-medium text-slate-900">
-                    Print ({activeEditingFile.copies}) Copy
-                  </span>
-                  <div className="flex items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        updateActiveEditingFile({
-                          copies: Math.max(1, activeEditingFile.copies - 1),
-                        })
-                      }
-                      className="w-7 h-7 rounded-full border border-slate-300 flex items-center justify-center text-slate-600 hover:bg-slate-50 active:scale-95"
-                    >
-                      <Minus className="w-3.5 h-3.5" />
-                    </button>
-                    <span className="w-4 text-center font-bold text-[14px] font-mono">
-                      {activeEditingFile.copies}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        updateActiveEditingFile({
-                          copies: Math.min(50, activeEditingFile.copies + 1),
-                        })
-                      }
-                      className="w-7 h-7 rounded-full border border-blue-600 text-blue-600 flex items-center justify-center hover:bg-blue-50 active:scale-95"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Done Button */}
-                <button
-                  type="button"
-                  onClick={() => setActiveEditingFileId(null)}
-                  className="w-full h-11 rounded-[12px] bg-[#0284C7] hover:bg-sky-700 active:scale-[0.99] transition-all text-white font-semibold text-[15px] mt-2 shadow-sm"
-                >
-                  Done
-                </button>
-              </div>
-            </div>
-
-            {/* Visual Page Range Selector Modal */}
-            {showPageRangeModal && (
-              <div className="absolute inset-0 z-60 bg-white flex flex-col animate-in slide-in-from-right duration-200">
-                <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-100">
-                  <button
-                    type="button"
-                    onClick={() => setShowPageRangeModal(false)}
-                    className="p-1 rounded-full text-slate-700 hover:bg-slate-100"
-                  >
-                    <ChevronLeft className="w-6 h-6 text-slate-800" />
-                  </button>
-                  <h3 className="text-[18px] font-semibold text-slate-900">Select Page Range</h3>
-                </div>
-
-                <div className="flex-1 p-6 overflow-y-auto">
-                  <div className="grid grid-cols-2 gap-6">
-                    {Array.from({ length: activeEditingFile.pages || 1 }, (_, i) => i + 1).map(
-                      (pageNum) => {
-                        const isChecked = activeEditingFile.selectedPages.includes(pageNum);
-
-                        return (
-                          <div
-                            key={pageNum}
-                            onClick={() => {
-                              let next: number[];
-                              if (isChecked) {
-                                next = activeEditingFile.selectedPages.filter((p) => p !== pageNum);
-                                if (next.length === 0) next = [pageNum];
-                              } else {
-                                next = [...activeEditingFile.selectedPages, pageNum].sort(
-                                  (a, b) => a - b
-                                );
-                              }
-                              updateActiveEditingFile({ selectedPages: next });
-                            }}
-                            className="flex flex-col items-center gap-2 cursor-pointer group"
-                          >
-                            <div className="w-[120px] h-[160px] bg-white rounded-lg border-2 border-slate-200 relative shadow-sm overflow-hidden flex flex-col p-2 group-hover:border-blue-500">
-                              <div className="w-full h-2 bg-slate-300 rounded mb-1" />
-                              <div className="w-3/4 h-1.5 bg-slate-200 rounded mb-1" />
-                              <div className="w-full h-1.5 bg-slate-100 rounded mb-1" />
-                              <div className="w-5/6 h-1.5 bg-slate-100 rounded mb-1" />
-                              <div className="w-full h-1.5 bg-slate-100 rounded mb-1" />
-
-                              <div
-                                className={`absolute bottom-2 right-2 w-6 h-6 rounded-full flex items-center justify-center transition-all ${
-                                  isChecked ? 'bg-[#0070F3] text-white shadow' : 'border-2 border-slate-300 bg-white'
-                                }`}
-                              >
-                                {isChecked && <Check className="w-4 h-4 stroke-[3]" />}
-                              </div>
-                            </div>
-                            <span className="text-[14px] font-semibold text-slate-800">
-                              Page {pageNum}
-                            </span>
-                          </div>
-                        );
-                      }
-                    )}
-                  </div>
-                </div>
-
-                <div className="p-4 border-t border-slate-100">
-                  <button
-                    type="button"
-                    onClick={() => setShowPageRangeModal(false)}
-                    className="w-full h-11 rounded-xl bg-blue-600 text-white font-semibold"
-                  >
-                    Confirm ({activeEditingFile.selectedPages.length} Pages Selected)
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
+        {activeEditingFile && (
+          <PrintStudio
+            fileItem={activeEditingFile}
+            shop={shop}
+            onUpdate={updateActiveEditingFile}
+            onClose={() => setActiveEditingFileId(null)}
+            onRemove={() => removeFile(activeEditingFile.id)}
+            onProceedToCheckout={handleProceedToPrint}
+          />
         )}
       </div>
     </div>

@@ -76,8 +76,8 @@ export default function DashboardLayout({
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Link href="/dashboard" className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded bg-[#1c1b1f] text-white flex items-center justify-center shadow-xs">
-                <Printer className="w-5 h-5 text-[#ff5a1f]" />
+              <div className="w-9 h-9 rounded-lg overflow-hidden flex items-center justify-center shadow-xs border border-[#e6e5df] bg-white">
+                <img src="/logo.png" alt="Gaurprint" className="w-full h-full object-contain" />
               </div>
               <div className="flex flex-col">
                 <div className="flex items-center gap-1.5 leading-none">

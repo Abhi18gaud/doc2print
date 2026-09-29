@@ -1270,8 +1270,9 @@ function registerIpcHandlers() {
     if (QRCode && QRCode.toDataURL) {
       try {
         const dataUrl = await QRCode.toDataURL(text, {
-          width: 600,
-          margin: 2,
+          width: 800,
+          margin: 1,
+          errorCorrectionLevel: 'H',
           color: {
             dark: '#0F172A',
             light: '#FFFFFF',
@@ -1283,7 +1284,7 @@ function registerIpcHandlers() {
       }
     }
     // Fallback to online API if needed
-    return `https://api.qrserver.com/v1/create-qr-code/?size=600x600&margin=4&data=${encodeURIComponent(text)}`;
+    return `https://api.qrserver.com/v1/create-qr-code/?size=800x800&ecc=H&margin=4&data=${encodeURIComponent(text)}`;
   });
 
   // Offline Native QR Code Generation (SVG)
@@ -1293,7 +1294,8 @@ function registerIpcHandlers() {
       try {
         const svg = await QRCode.toString(text, {
           type: 'svg',
-          margin: 2,
+          margin: 1,
+          errorCorrectionLevel: 'H',
           color: {
             dark: '#0F172A',
             light: '#FFFFFF',
