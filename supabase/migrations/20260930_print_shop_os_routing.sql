@@ -93,3 +93,14 @@ BEGIN
     ALTER TABLE public.printers ADD COLUMN media_loaded TEXT DEFAULT 'plain';
   END IF;
 END $$;
+
+-- 3. Safely expand jobs_print_status_check to allow extended lifecycle values
+DO $$
+BEGIN
+  ALTER TABLE public.jobs DROP CONSTRAINT IF EXISTS jobs_print_status_check;
+  ALTER TABLE public.jobs ADD CONSTRAINT jobs_print_status_check 
+    CHECK (print_status IN ('pending_payment', 'queued', 'waiting_for_preparation', 'waiting_for_printer', 'printing', 'completed', 'failed', 'cancelled'));
+EXCEPTION
+  WHEN OTHERS THEN
+    NULL;
+END $$;

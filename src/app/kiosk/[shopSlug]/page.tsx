@@ -1025,13 +1025,17 @@ export default function KioskUploadPage() {
           </div>
         </section>
 
-        {/* BOTTOM STICKY ACTION BUTTON: Pay & Print */}
+        {/* BOTTOM STICKY ACTION BUTTON: Pay & Print / Send to Shop */}
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 w-full max-w-[440px] px-4 z-40">
           <button
             type="button"
             onClick={handleProceedToPrint}
             disabled={files.length === 0 || isProcessingUpload}
-            className="w-full h-[52px] bg-[#2563EB] hover:bg-blue-700 active:scale-[0.99] transition-all rounded-[16px] px-5 flex items-center justify-between text-white shadow-[0px_10px_15px_-3px_rgba(59,130,246,0.25),0px_4px_6px_-4px_rgba(59,130,246,0.25)] disabled:opacity-50"
+            className={`w-full h-[52px] active:scale-[0.99] transition-all rounded-[16px] px-5 flex items-center justify-between text-white disabled:opacity-50 ${
+              files.some((f) => f.needsShopPreparation)
+                ? 'bg-[#7E22CE] hover:bg-[#6B21A8] shadow-[0px_10px_15px_-3px_rgba(126,34,206,0.3)]'
+                : 'bg-[#2563EB] hover:bg-blue-700 shadow-[0px_10px_15px_-3px_rgba(59,130,246,0.25)]'
+            }`}
           >
             <div className="flex items-center gap-2">
               <Printer className="w-5 h-5 text-white" />
@@ -1040,11 +1044,15 @@ export default function KioskUploadPage() {
                   ? 'Processing Bundle...'
                   : files.length === 0
                   ? 'Upload Files to Print'
+                  : files.some((f) => f.needsShopPreparation)
+                  ? `🛠️ Send to Shop (${files.length} ${files.length === 1 ? 'File' : 'Files'})`
                   : `Pay & Print (${files.length} ${files.length === 1 ? 'File' : 'Files'})`}
               </span>
             </div>
 
-            <div className="bg-[#1D4ED8]/50 px-2.5 py-1 rounded-[8px] text-[14px] font-normal tracking-wide" style={{ fontFamily: "'ABeeZee', sans-serif" }}>
+            <div className={`px-2.5 py-1 rounded-[8px] text-[14px] font-normal tracking-wide ${
+              files.some((f) => f.needsShopPreparation) ? 'bg-[#6B21A8]/60' : 'bg-[#1D4ED8]/50'
+            }`} style={{ fontFamily: "'ABeeZee', sans-serif" }}>
               ₹{totalPrice.toFixed(2)} →
             </div>
           </button>

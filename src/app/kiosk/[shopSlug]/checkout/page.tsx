@@ -69,6 +69,7 @@ export default function KioskCheckoutPage() {
 
   // Payment method: 'online' | 'cash'
   const [paymentMode, setPaymentMode] = useState<'online' | 'cash'>('online');
+  const [isShopPrep, setIsShopPrep] = useState(false);
 
   useEffect(() => {
     // Load config from sessionStorage
@@ -93,6 +94,22 @@ export default function KioskCheckoutPage() {
     const storedPrice = sessionStorage.getItem('qp_price');
     const storedFilesCount = sessionStorage.getItem('qp_files_count');
     const storedFileConfigs = sessionStorage.getItem('qp_file_configs');
+    const storedNeedsShopPrep = sessionStorage.getItem('qp_needs_shop_prep');
+
+    let isAnyShopPrep = storedNeedsShopPrep === 'true';
+    if (storedFileConfigs) {
+      try {
+        const parsed = JSON.parse(storedFileConfigs);
+        if (Array.isArray(parsed) && parsed.some((c: any) => c.needsShopPreparation)) {
+          isAnyShopPrep = true;
+        }
+      } catch (e) {}
+    }
+
+    if (isAnyShopPrep) {
+      setIsShopPrep(true);
+      setPaymentMode('cash');
+    }
 
     if (storedName) setFileName(storedName);
     if (storedType) setFileType(storedType);
@@ -366,6 +383,23 @@ export default function KioskCheckoutPage() {
           </div>
         )}
 
+        {/* SHOP PREPARATION BANNER */}
+        {isShopPrep && (
+          <div className="mb-4 p-3.5 bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-200/80 rounded-2xl flex items-start gap-3 shadow-sm">
+            <div className="w-8 h-8 rounded-xl bg-purple-600 text-white flex items-center justify-center shrink-0 shadow-sm font-bold text-sm">
+              🛠️
+            </div>
+            <div className="flex-1 min-w-0">
+              <h4 className="text-[13px] font-bold text-purple-900 leading-tight">
+                Send to Shop · Assisted Print
+              </h4>
+              <p className="text-[12px] text-purple-700/90 leading-relaxed mt-0.5">
+                Your file will be sent directly to the counter operator terminal. They will inspect the photo, calibrate margins, and choose the correct photo paper on the spot.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* ORDER SUMMARY CARD */}
         <section className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-[16px] p-4 mb-4">
           <div className="flex items-center justify-between mb-3 pb-2.5 border-b border-[#E2E8F0]">
@@ -619,6 +653,8 @@ export default function KioskCheckoutPage() {
             className={`flex-1 h-[52px] rounded-[16px] text-white font-bold text-[15px] flex items-center justify-center gap-2 shadow-md transition-all active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed ${
               isOrdersPaused || !hasPaymentMethod
                 ? 'bg-slate-400'
+                : isShopPrep
+                ? 'bg-purple-700 hover:bg-purple-800 shadow-[0px_8px_15px_-3px_rgba(126,34,206,0.35)]'
                 : paymentMode === 'online'
                 ? 'bg-[#2563EB] hover:bg-blue-700 shadow-[0px_8px_15px_-3px_rgba(37,99,235,0.3)]'
                 : 'bg-[#334155] hover:bg-slate-700 shadow-[0px_8px_15px_-3px_rgba(51,65,85,0.3)]'
@@ -634,6 +670,11 @@ export default function KioskCheckoutPage() {
               'Orders Paused'
             ) : !hasPaymentMethod ? (
               'Payments Disabled'
+            ) : isShopPrep ? (
+              <>
+                <span>Send to Shop & Issue Token</span>
+                <ArrowRight className="w-4 h-4" />
+              </>
             ) : paymentMode === 'online' ? (
               <>
                 <span>Pay ₹{price.toFixed(2)} & Print</span>

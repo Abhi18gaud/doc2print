@@ -662,6 +662,31 @@
         return;
       }
 
+      // Query live health for all printers in parallel
+      const healthPromises = availablePrinters.map(async (name) => {
+        try {
+          if (window.quickprintApi?.getPrinterHealth) {
+            return await window.quickprintApi.getPrinterHealth(name);
+          }
+        } catch (e) {}
+        return { isOnline: false, status: 'UNKNOWN', details: 'Status unknown' };
+      });
+      const healthResults = await Promise.all(healthPromises);
+      const healthMap = {};
+      availablePrinters.forEach((name, i) => {
+        healthMap[name] = healthResults[i];
+      });
+
+      // Update Top Status Header with Default Printer Real Health
+      if (topPrinterName) {
+        const defHealth = healthMap[defaultPrinterName];
+        const isDefOnline = defHealth?.isOnline && defHealth?.status === 'READY';
+        const isDefError = defHealth?.status === 'ERROR' || defHealth?.status === 'OFFLINE' || !defHealth?.isOnline;
+        const badgeColor = isDefOnline ? 'green' : 'red';
+        const badgeText = isDefOnline ? '● Online & Ready' : (defHealth?.status === 'ERROR' ? '● Error: Disconnected' : '● Offline');
+        topPrinterName.innerHTML = `Default: <strong>${defaultPrinterName}</strong> <span class="badge-chip ${badgeColor}" style="font-size:10px; margin-left:6px; font-weight:700;">${badgeText}</span>`;
+      }
+
       availablePrinters.forEach((name) => {
         const isDef = name === defaultPrinterName;
         const profile = multiPrinterConfig.printersConfig?.[name] || {
@@ -696,25 +721,37 @@
         };
         const typeLabel = typeLabels[profile.type] || 'Standard';
 
+        const health = healthMap[name] || { isOnline: true, status: 'READY' };
+        const isOnline = health.isOnline && health.status === 'READY';
+        const isOffline = health.status === 'OFFLINE' || (!health.isOnline && health.status !== 'ERROR');
+        const isError = health.status === 'ERROR';
+
+        let statusDotClass = isOnline ? (isDef ? 'pulse-dot-sm' : 'idle-dot-sm') : 'red-dot-sm';
+        let statusLabel = isOnline
+          ? (isDef ? 'Primary Default • Ready' : 'Ready')
+          : (isError ? `Error: Disconnected / Not Plugged In` : `Offline: Disconnected`);
+
         // Card
         const card = document.createElement('div');
-        card.className = `printer-card ${isDef ? 'default' : ''}`;
+        card.className = `printer-card ${isDef ? 'default' : ''} ${!isOnline ? 'offline' : ''}`;
         card.innerHTML = `
           <div class="printer-card-header">
             <div class="printer-title-box">
-              <div class="printer-avatar ${isDef ? 'active-avatar' : ''}">
+              <div class="printer-avatar ${isDef ? 'active-avatar' : ''}" style="${!isOnline ? 'background:#FEE2E2; color:#DC2626;' : ''}">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect width="12" height="8" x="6" y="14"/></svg>
               </div>
               <div>
                 <h3 class="printer-name-h3" title="${displayName}">${displayName}</h3>
-                <span class="printer-status-sub ${isDef ? 'active' : ''}">
-                  <span class="${isDef ? 'pulse-dot-sm' : 'idle-dot-sm'}"></span>
-                  ${isDef ? 'Primary Default' : 'Ready'} • ${typeLabel}
+                <span class="printer-status-sub ${isDef && isOnline ? 'active' : ''}" style="${!isOnline ? 'color:#DC2626; font-weight:600;' : ''}">
+                  <span class="${statusDotClass}" style="${!isOnline ? 'background:#DC2626;' : ''}"></span>
+                  ${statusLabel} • ${typeLabel}
                 </span>
+                ${!isOnline && health.details ? `<div style="font-size:10px; color:#EF4444; margin-top:2px;">⚠️ ${health.details}</div>` : ''}
               </div>
             </div>
             <div style="display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
               ${isDef ? '<span class="badge-chip badge-primary-subtle">DEFAULT</span>' : ''}
+              ${!isOnline ? '<span class="badge-chip red" style="font-size:10px; font-weight:700;">OFFLINE</span>' : '<span class="badge-chip green" style="font-size:10px; font-weight:700;">ONLINE</span>'}
               ${multiPrinterConfig.multiPrinterMode ? `<span class="badge-chip grey" style="font-size:10px;">Priority ${profile.priority || 2}</span>` : ''}
             </div>
           </div>
@@ -1317,7 +1354,7 @@
                 <span class="customer-phone">${job.customer_phone || ''}</span>
               </div>
               <div class="order-specs-chips">
-                ${(job.needs_shop_preparation || job.status === 'waiting_for_preparation') ? '<span class="spec-chip" style="background:#7E22CE; color:white; font-weight:800; border-color:#6B21A8;">🛠️ NEEDS SHOP PREP</span>' : ''}
+                ${(job.needs_shop_preparation || job.print_config?.needsShopPreparation || job.status === 'waiting_for_preparation') ? '<span class="spec-chip" style="background:#7E22CE; color:white; font-weight:800; border-color:#6B21A8;">🛠️ NEEDS SHOP PREP</span>' : ''}
                 ${(job.print_type === 'photo' || job.mode === 'photo') ? '<span class="spec-chip color" style="font-weight:700;">📸 PHOTO LAB</span>' : (job.print_type === 'image' || job.mode === 'image') ? '<span class="spec-chip" style="font-weight:700;">🖼️ IMAGE PRINT</span>' : ''}
                 <span class="spec-chip ${job.color_mode === 'color' ? 'color' : 'bw'}">${colorMode}</span>
                 <span class="spec-chip">${pages} Pages × ${copies} Copy</span>
@@ -1340,7 +1377,7 @@
 
             <div class="order-actions">
               ${
-                (job.needs_shop_preparation || job.status === 'waiting_for_preparation')
+                (job.needs_shop_preparation || job.print_config?.needsShopPreparation || job.status === 'waiting_for_preparation')
                   ? `<button class="btn btn-primary btn-sm btn-open-shop-studio" data-id="${job.id}" style="background:#7E22CE; border-color:#6B21A8;">✂️ Open Studio</button>`
                   : isCompleted
                   ? `<span class="badge-chip green" style="padding: 6px 12px; font-weight: 700; border-radius: 6px;">✓ PRINT COMPLETED</span>
@@ -1632,7 +1669,12 @@
       try {
         let mediaUrl = null;
         if (window.quickprintApi?.getLocalMediaUrl) {
-          mediaUrl = await window.quickprintApi.getLocalMediaUrl(job.id);
+          const res = await window.quickprintApi.getLocalMediaUrl(job.id);
+          if (res && res.available && res.dataUrl) {
+            mediaUrl = res.dataUrl;
+          } else if (typeof res === 'string') {
+            mediaUrl = res;
+          }
         }
         if (!mediaUrl && job.file_url) mediaUrl = job.file_url;
         if (mediaUrl) imgEl.src = mediaUrl;
@@ -2008,8 +2050,8 @@
       previewOrientationPill.textContent = `${orientationLabel} Paper Preview`;
     }
 
-    // Handle deleted/purged media gracefully (Requirements 5 & 35)
-    if (job.local_media_status === 'deleted') {
+    // Handle genuinely deleted/purged media gracefully (Requirements 5 & 35)
+    if (job.local_media_status === 'deleted' && !job.file_url) {
       previewIframe.style.display = 'none';
       imagePreviewContainer.style.display = 'none';
       previewDeletedNotice.style.display = 'flex';
@@ -2036,8 +2078,12 @@
       let resolvedSrc = null;
       try {
         if (window.quickprintApi?.getLocalMediaUrl) {
-          const localUrl = await window.quickprintApi.getLocalMediaUrl(job.id);
-          if (localUrl) resolvedSrc = localUrl;
+          const res = await window.quickprintApi.getLocalMediaUrl(job.id);
+          if (res && res.available && res.dataUrl) {
+            resolvedSrc = res.dataUrl;
+          } else if (typeof res === 'string') {
+            resolvedSrc = res;
+          }
         }
       } catch (e) {}
 
@@ -2048,6 +2094,7 @@
       if (resolvedSrc) {
         previewImg.onload = () => {
           previewImg.style.display = 'block';
+          previewDeletedNotice.style.display = 'none';
           // If orientation was not hardcoded in order, adapt sheet to true aspect ratio
           if (!job.orientation && !job.paper_size?.toLowerCase().includes('landscape')) {
             if (previewImg.naturalWidth > previewImg.naturalHeight * 1.12) {
@@ -2060,8 +2107,12 @@
           }
         };
         previewImg.onerror = () => {
-          previewImg.style.display = 'none';
-          previewDeletedNotice.style.display = 'flex';
+          if (resolvedSrc !== job.file_url && job.file_url) {
+            previewImg.src = job.file_url;
+          } else {
+            previewImg.style.display = 'none';
+            previewDeletedNotice.style.display = 'flex';
+          }
         };
         previewImg.src = resolvedSrc;
       } else {
@@ -2075,34 +2126,8 @@
       previewIframe.style.display = 'block';
 
       if (job.file_url) {
-        previewIframe.srcdoc = `
-          <body style="font-family:system-ui,-apple-system,sans-serif; display:flex; align-items:center; justify-content:center; height:100vh; margin:0; background:#f8fafc; color:#64748b;">
-            <div style="text-align:center;">
-              <p>⏳ Loading document preview...</p>
-            </div>
-          </body>
-        `;
-        fetch(job.file_url, { method: 'HEAD' })
-          .then((resp) => {
-            if (resp.ok) {
-              previewIframe.removeAttribute('srcdoc');
-              previewIframe.src = job.file_url;
-            } else {
-              previewIframe.srcdoc = `
-                <body style="font-family:system-ui,-apple-system,sans-serif; display:flex; align-items:center; justify-content:center; height:100vh; margin:0; background:#f8fafc;">
-                  <div style="text-align:center; padding: 24px; max-width: 400px; border-radius: 12px; background: white; box-shadow: 0 4px 16px rgba(0,0,0,0.06);">
-                    <div style="font-size: 40px; margin-bottom: 12px;">🔒</div>
-                    <h3 style="margin: 0 0 8px; color: #0f172a; font-weight: 700;">Media file is no longer available</h3>
-                    <p style="font-size: 13px; color: #64748b; line-height: 1.5; margin: 0;">This customer document was purged in accordance with data retention policies.</p>
-                  </div>
-                </body>
-              `;
-            }
-          })
-          .catch(() => {
-            previewIframe.removeAttribute('srcdoc');
-            previewIframe.src = job.file_url;
-          });
+        previewIframe.removeAttribute('srcdoc');
+        previewIframe.src = job.file_url;
       } else {
         previewIframe.srcdoc = `
           <body style="font-family:system-ui,-apple-system,sans-serif; display:flex; align-items:center; justify-content:center; height:100vh; margin:0; background:#f8fafc;">

@@ -238,12 +238,8 @@ export async function POST(request: NextRequest) {
       formData.get('needs_shop_preparation') === 'true' ||
       Boolean(printConfig?.needsShopPreparation);
 
-    // If customer selected "Send to Shop for Preparation", initial status is waiting_for_preparation
-    const initialPrintStatus = needsShopPreparation
-      ? 'waiting_for_preparation'
-      : printStatus;
-
     // 3. Insert job record into Supabase (Permanent unique UUID id + scoped daily_token)
+    // Note: print_status strictly obeys the PostgreSQL check constraint: 'queued' | 'pending_payment'
     const baseJobPayload = {
       shop_id: shopId,
       printer_id: printerId,
@@ -261,8 +257,8 @@ export async function POST(request: NextRequest) {
       price: finalPrice,
       payment_mode: paymentMode === 'online' ? 'online' : 'cash',
       payment_status: paymentStatus,
-      print_status: initialPrintStatus,
-      queued_at: isPaidOnline && !needsShopPreparation ? new Date().toISOString() : null,
+      print_status: printStatus,
+      queued_at: isPaidOnline ? new Date().toISOString() : null,
     };
 
     // Extended payload with canonical configuration
@@ -272,7 +268,8 @@ export async function POST(request: NextRequest) {
       quality,
       photo_size: photoSize || null,
       selected_pages: selectedPages.length > 0 ? selectedPages : null,
-      print_config: printConfig || {
+      print_config: {
+        ...(printConfig || {}),
         mode,
         paperSize: rawPaperSize,
         paperType,
@@ -285,6 +282,7 @@ export async function POST(request: NextRequest) {
         orientation,
         copies,
         needsShopPreparation,
+        preparationStatus: needsShopPreparation ? 'waiting_for_preparation' : 'ready',
       },
       needs_shop_preparation: needsShopPreparation,
     };
@@ -298,12 +296,23 @@ export async function POST(request: NextRequest) {
 
     if (insertError) {
       console.warn('Extended job insert returned warning/error, retrying with base columns:', insertError.message);
-      // Fallback in case columns do not exist in current Postgres instance
-      const retry = await client
+      // Fallback in case custom columns (like needs_shop_preparation) do not exist yet in live Supabase
+      const fallbackPayload = {
+        ...baseJobPayload,
+        print_config: extendedJobPayload.print_config,
+      };
+      let retry = await client
         .from('jobs')
-        .insert(baseJobPayload)
+        .insert(fallbackPayload)
         .select()
         .single();
+      if (retry.error) {
+        retry = await client
+          .from('jobs')
+          .insert(baseJobPayload)
+          .select()
+          .single();
+      }
       if (retry.error) {
         console.error('Supabase job insert error:', retry.error);
         return NextResponse.json(

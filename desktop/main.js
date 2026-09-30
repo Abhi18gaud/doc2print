@@ -454,19 +454,21 @@ function getRealPrinterStatus(printerName) {
         if (-not $target) { exit }
 
         # Literal match avoids bracket wildcard issues with HP printers like [F1673F]
+        $gp = Get-Printer | Where-Object { $_.Name.Trim() -eq $target.Trim() } | Select-Object -First 1
         $p = Get-CimInstance Win32_Printer | Where-Object { $_.Name.Trim() -eq $target.Trim() } | Select-Object -First 1
 
-        if (-not $p) {
+        if (-not $p -and -not $gp) {
           @{ exists = $false; status = 'NOT_FOUND'; details = 'Printer not found in Windows'; isOnline = $false; jobCount = 0 } | ConvertTo-Json -Compress
           exit
         }
 
-        $offline = [bool]$p.WorkOffline
-        $ext = [int]$p.ExtendedPrinterStatus
-        $pState = [int]$p.PrinterState
+        $offline = if ($p) { [bool]$p.WorkOffline } else { $false }
+        $ext = if ($p) { [int]$p.ExtendedPrinterStatus } else { 0 }
+        $pState = if ($p) { [int]$p.PrinterState } else { 0 }
+        $gpStatus = if ($gp) { [string]$gp.PrinterStatus } else { '' }
 
-        # Spool jobs count using literal filter
-        $spoolJobs = Get-PrintJob | Where-Object { $_.PrinterName.Trim() -eq $target.Trim() }
+        # Safe spool job counting passing PrinterObject directly to avoid parameter binding errors
+        $spoolJobs = if ($gp) { Get-PrintJob -PrinterObject $gp -ErrorAction SilentlyContinue } else { @() }
         $jCount = if ($spoolJobs) { @($spoolJobs).Count } else { 0 }
 
         $status = 'READY'
@@ -477,18 +479,15 @@ function getRealPrinterStatus(printerName) {
           $status = 'OFFLINE'
           $details = 'Printer is set to Offline in Windows'
           $isOnline = $false
-        } elseif ($ext -eq 7) {
-          $status = 'OFFLINE'
-          $details = 'Printer disconnected or power off'
+        } elseif ($gpStatus -match 'Offline|Error|DoorOpen|PaperOut|PaperJam|NotAvailable' -or $ext -in @(7, 9) -or $pState -in @(2, 4, 8, 16, 32)) {
+          $isOfflineType = $gpStatus -match 'Offline' -or $ext -eq 7
+          $status = if ($isOfflineType) { 'OFFLINE' } else { 'ERROR' }
+          $details = if ($gpStatus) { "Printer status: $gpStatus (Hardware disconnected or power off)" } else { 'Printer disconnected or power off' }
           $isOnline = $false
-        } elseif ($ext -eq 8) {
+        } elseif ($ext -eq 8 -or $gpStatus -match 'Paused') {
           $status = 'PAUSED'
           $details = 'Printer is paused'
-          $isOnline = $true
-        } elseif ($ext -eq 9 -or $pState -eq 2) {
-          $status = 'ERROR'
-          $details = 'Printer reports hardware error'
-          $isOnline = $false
+          $isOnline = false
         } elseif ($jCount -gt 0) {
           $status = 'PRINTING'
           $details = "$jCount active print job(s) in spooler"
@@ -503,7 +502,7 @@ function getRealPrinterStatus(printerName) {
           jobCount = $jCount;
         } | ConvertTo-Json -Compress
       } catch {
-        @{ exists = $true; status = 'READY'; details = 'Printer Ready & Active'; isOnline = $true; jobCount = 0 } | ConvertTo-Json -Compress
+        @{ exists = $false; status = 'OFFLINE'; details = 'Hardware disconnected or driver unreachable'; isOnline = $false; jobCount = 0 } | ConvertTo-Json -Compress
       }
     `;
 
@@ -518,9 +517,9 @@ function getRealPrinterStatus(printerName) {
         }
         return handleResult({
           exists: true,
-          status: 'READY',
-          details: 'Printer Ready & Idle',
-          isOnline: true,
+          status: 'OFFLINE',
+          details: 'Printer hardware check failed or timed out',
+          isOnline: false,
           jobCount: 0,
         });
       }
@@ -530,9 +529,9 @@ function getRealPrinterStatus(printerName) {
       } catch (parseErr) {
         handleResult({
           exists: true,
-          status: 'READY',
-          details: 'Printer Ready & Idle',
-          isOnline: true,
+          status: 'OFFLINE',
+          details: 'Printer status unparseable / offline',
+          isOnline: false,
           jobCount: 0,
         });
       }
@@ -2067,9 +2066,10 @@ function registerIpcHandlers() {
         const hasLocalMedia =
           fs.existsSync(jobDir) &&
           fs.readdirSync(jobDir).some((f) => f.startsWith('original.'));
+        const isCloudPurged = job.cloud_media_status === 'deleted';
         return {
           ...job,
-          local_media_status: hasLocalMedia ? 'available' : 'deleted',
+          local_media_status: hasLocalMedia ? 'available' : (isCloudPurged && !job.file_url ? 'deleted' : 'pending_download'),
         };
       });
 
