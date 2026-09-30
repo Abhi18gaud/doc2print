@@ -650,44 +650,85 @@ function detectHardwarePrinterCapabilities(printerName) {
   });
 }
 
-// Check if a specific printer satisfies the required job parameters (Requirement 13 & 21)
+// Check if a specific printer satisfies the required job parameters (Full Capability Model)
 function isPrinterCompatibleWithJob(job, printerProfile) {
   if (!printerProfile) return { compatible: true };
   if (printerProfile.enabled === false) {
     return { compatible: false, reason: 'Printer disabled in Shop Routing Configuration' };
   }
 
-  const caps = printerProfile.capabilities || {};
-
-  // Check Color Requirement
-  const jobColor = (job.color_mode || 'bw').toLowerCase();
-  if (jobColor === 'color' && !caps.color) {
-    return { compatible: false, reason: 'Printer is Monochrome only (Order requires Full Color)' };
+  // Stock status check: cannot route to an out-of-paper printer
+  if (printerProfile.stockStatus === 'out_of_paper') {
+    return { compatible: false, reason: 'Printer is out of paper (Stock depleted)' };
   }
 
-  // Check Duplex Requirement
-  if (job.duplex && !caps.duplex) {
+  const caps = printerProfile.capabilities || {};
+  const cfg = job.print_config || {};
+
+  // 1. Check Print Type (Photo / Image / Document)
+  const jobMode = (job.mode || cfg.mode || (job.photo_size ? 'photo' : 'document')).toLowerCase();
+  if (caps.printTypes) {
+    if (jobMode === 'photo' && !caps.printTypes.photo) {
+      return { compatible: false, reason: 'Printer does not support dedicated Photo Studio printing' };
+    }
+    if (jobMode === 'image' && !caps.printTypes.image) {
+      return { compatible: false, reason: 'Printer does not support Image printing' };
+    }
+    if (jobMode === 'document' && !caps.printTypes.document) {
+      return { compatible: false, reason: 'Printer does not support Document printing' };
+    }
+  }
+
+  // 2. Check Color Requirement
+  const jobColor = (job.color_mode || cfg.colorMode || 'bw').toLowerCase();
+  const supportsColor = caps.color !== false && printerProfile.type !== 'bw';
+  if (jobColor === 'color' && !supportsColor) {
+    return { compatible: false, reason: 'Printer is Monochrome only (Job requires Full Color)' };
+  }
+
+  // 3. Check Duplex Requirement
+  const isDuplex = Boolean(job.duplex || cfg.duplex);
+  if (isDuplex && !caps.duplex) {
     return { compatible: false, reason: 'Printer does not support Two-Sided (Duplex) printing' };
   }
 
-  // Check Paper / Photo Size Requirement
-  const rawPaper = (job.paper_size || 'A4').toUpperCase();
-  if (rawPaper.includes('A3') && !caps.a3) {
+  // 4. Check Paper Size Requirement
+  const rawPaper = (job.paper_size || cfg.paperSize || (jobMode === 'photo' ? 'photo_4x6' : 'A4')).toUpperCase();
+  const pCaps = caps.paperSizes || caps;
+
+  if (rawPaper.includes('A3') && !pCaps.a3) {
     return { compatible: false, reason: 'Printer does not support A3 paper size' };
   }
-  if (rawPaper.includes('4X6') && !caps.photo_4x6) {
+  if (rawPaper.includes('A5') && pCaps.a5 === false) {
+    return { compatible: false, reason: 'Printer does not support A5 paper size' };
+  }
+  if (rawPaper.includes('4X6') && !pCaps.photo_4x6 && !caps.photo_4x6) {
     return { compatible: false, reason: 'Printer does not support 4×6 photo size' };
   }
-  if (rawPaper.includes('5X7') && !caps.photo_5x7) {
+  if (rawPaper.includes('5X7') && !pCaps.photo_5x7 && !caps.photo_5x7) {
     return { compatible: false, reason: 'Printer does not support 5×7 photo size' };
   }
-  if (rawPaper.includes('LEGAL') && !caps.legal) {
+  if (rawPaper.includes('LEGAL') && pCaps.legal === false && caps.legal === false) {
     return { compatible: false, reason: 'Printer does not support Legal paper size' };
   }
 
-  // Check Photo Paper / Mode
-  if ((job.mode === 'photo' || rawPaper.includes('PHOTO')) && printerProfile.type === 'bw') {
-    return { compatible: false, reason: 'B&W printer cannot process photo studio jobs' };
+  // 5. Check Media / Paper Type
+  const rawMedia = (job.paper_type || job.photo_paper || cfg.photoPaper || cfg.paperType || '').toLowerCase();
+  const mCaps = caps.mediaTypes || {};
+  if (rawMedia.includes('gloss') && mCaps.glossy_photo === false) {
+    return { compatible: false, reason: 'Printer does not support Glossy Photo Paper' };
+  }
+  if (rawMedia.includes('matte') && mCaps.matte_photo === false) {
+    return { compatible: false, reason: 'Printer does not support Matte Photo Paper' };
+  }
+  if (rawMedia.includes('card') && mCaps.card_thick === false) {
+    return { compatible: false, reason: 'Printer does not support Heavy Card / Bond Paper' };
+  }
+
+  // 6. Check Borderless Requirement
+  const isBorderless = Boolean(job.borderless || cfg.borderless);
+  if (isBorderless && !caps.borderless) {
+    return { compatible: false, reason: 'Printer does not support Borderless (edge-to-edge) printing' };
   }
 
   return { compatible: true };
@@ -703,6 +744,7 @@ function findBestPrinterForJob(job, printersList, liveHealthMap = {}) {
 
   const printersConfig = appConfig.printersConfig || {};
   const candidates = [];
+  const rejectedReasons = [];
 
   for (const name of printersList) {
     const profile = printersConfig[name] || {
@@ -713,7 +755,10 @@ function findBestPrinterForJob(job, printersList, liveHealthMap = {}) {
     };
 
     const comp = isPrinterCompatibleWithJob(job, profile);
-    if (!comp.compatible) continue;
+    if (!comp.compatible) {
+      rejectedReasons.push(`${profile.customName || name}: ${comp.reason}`);
+      continue;
+    }
 
     const health = liveHealthMap[name] || { isOnline: true, status: 'READY', jobCount: 0 };
     const isOnline = health.isOnline && health.status === 'READY';
@@ -732,7 +777,7 @@ function findBestPrinterForJob(job, printersList, liveHealthMap = {}) {
     return {
       printer: null,
       status: 'waiting_for_compatible_printer',
-      reason: 'No compatible printer found in shop for this order configuration',
+      reason: `No compatible printer found in shop for this job.\nDetails:\n${rejectedReasons.join('\n')}`,
     };
   }
 
@@ -740,16 +785,14 @@ function findBestPrinterForJob(job, printersList, liveHealthMap = {}) {
   const onlineCandidates = candidates.filter((c) => c.isOnline);
   if (onlineCandidates.length === 0) {
     return {
-      printer: candidates[0].name,
+      printer: null,
       isOffline: true,
       status: 'waiting_for_printer',
-      reason: 'All compatible printers are currently OFFLINE or in error',
+      reason: 'All compatible printers are currently OFFLINE or in error state.',
     };
   }
 
   // Rank online candidates:
-  // If loadBalancing enabled: lowest queueCount first, then lowest priority number (1 > 2 > 3)
-  // If loadBalancing disabled: priority first, then queueCount
   onlineCandidates.sort((a, b) => {
     if (appConfig.loadBalancing !== false) {
       if (a.queueCount !== b.queueCount) return a.queueCount - b.queueCount;

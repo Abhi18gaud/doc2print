@@ -79,6 +79,7 @@ export interface FileItem {
   // Print Studio attributes
   renderedDataUrl?: string;
   editState?: ImageEditState;
+  needsShopPreparation?: boolean;
 }
 
 export default function KioskUploadPage() {
@@ -467,6 +468,48 @@ export default function KioskUploadPage() {
           sessionStorage.setItem('qp_color_mode', aggregateColorMode);
           sessionStorage.setItem('qp_duplex', String(aggregateDuplex));
           sessionStorage.setItem('qp_files_count', String(files.length));
+
+          // Store canonical print config with transforms for Counter OS
+          const printConfig = {
+            mode: primary.mode,
+            paperSize: primary.paperSize,
+            paperType: primary.paperType,
+            quality: primary.quality,
+            photoSize: primary.photoSize,
+            photoPaper: primary.photoPaper,
+            photoQuality: primary.photoQuality,
+            colorMode: aggregateColorMode,
+            duplex: aggregateDuplex,
+            orientation: primary.orientation,
+            copies: primary.copies || 1,
+            borderless: primary.borderless || false,
+            fitMode: primary.fitMode || 'fit',
+            alignment: primary.alignment || 'center',
+            transform: primary.editState
+              ? {
+                  cropX: primary.editState.crop.x,
+                  cropY: primary.editState.crop.y,
+                  cropWidth: primary.editState.crop.width,
+                  cropHeight: primary.editState.crop.height,
+                  scale: primary.editState.zoom,
+                  rotation: primary.editState.rotation,
+                  flipH: primary.editState.flipH,
+                  flipV: primary.editState.flipV,
+                  positionX: primary.editState.panX,
+                  positionY: primary.editState.panY,
+                }
+              : undefined,
+            adjustments: primary.adjustments,
+            needsShopPreparation: files.some((f) => f.needsShopPreparation),
+          };
+          sessionStorage.setItem('qp_print_config', JSON.stringify(printConfig));
+
+          if (files.some((f) => f.needsShopPreparation)) {
+            sessionStorage.setItem('qp_needs_shop_prep', 'true');
+          } else {
+            sessionStorage.removeItem('qp_needs_shop_prep');
+          }
+
           // Store full per-file configs for accurate checkout display
           const fileConfigs = files.map((f) => ({
             name: f.name,
@@ -483,6 +526,7 @@ export default function KioskUploadPage() {
             photoQuality: f.photoQuality,
             orientation: f.orientation,
             price: getFileCalculation(f).total,
+            needsShopPreparation: f.needsShopPreparation,
           }));
           sessionStorage.setItem('qp_file_configs', JSON.stringify(fileConfigs));
         } catch (e) {
@@ -879,6 +923,29 @@ export default function KioskUploadPage() {
                           <span>{item.type === 'pdf' ? 'Prepare' : 'Edit'}</span>
                         </button>
                       </div>
+
+                      {/* Direct Send to Shop Preparation Toggle */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setFiles((prev) =>
+                            prev.map((f) =>
+                              f.id === item.id
+                                ? { ...f, needsShopPreparation: !f.needsShopPreparation }
+                                : f
+                            )
+                          );
+                        }}
+                        className={`w-full py-1 px-1.5 rounded-md text-[9.5px] font-bold flex items-center justify-center gap-1 transition-all mt-1 ${
+                          item.needsShopPreparation
+                            ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                            : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200'
+                        }`}
+                        title="Shop operator will calibrate and adjust print options at counter"
+                      >
+                        <span>{item.needsShopPreparation ? '✓ Sent to Shop' : '🛠️ Send to Shop'}</span>
+                      </button>
                     </div>
                   </div>
                 );

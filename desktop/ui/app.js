@@ -575,30 +575,71 @@
     if (printerProfile.enabled === false) {
       return { compatible: false, reason: 'Routing disabled in shop config' };
     }
+    if (printerProfile.stock_status === 'out_of_paper') {
+      return { compatible: false, reason: 'Media Out / Paper Tray Empty' };
+    }
+
     const caps = printerProfile.capabilities || {};
-    const jobColor = (job.color_mode || 'bw').toLowerCase();
+    const printConfig = job.print_config || {};
+
+    // 1. Print Type validation (Photo vs Image vs Document)
+    const jobPrintType = (job.print_type || printConfig.printType || job.mode || 'document').toLowerCase();
+    if (jobPrintType === 'photo') {
+      const supportsPhoto = caps.supports_photo !== false && (caps.photo_4x6 || caps.photo_5x7 || caps.glossy_paper || printerProfile.type === 'photo');
+      if (!supportsPhoto && printerProfile.type !== 'photo') {
+        return { compatible: false, reason: 'Photo print requires photo-grade hardware' };
+      }
+    } else if (jobPrintType === 'document') {
+      if (caps.supports_document === false && printerProfile.type === 'photo') {
+        return { compatible: false, reason: 'Dedicated photo printer does not accept general documents' };
+      }
+    }
+
+    // 2. Color mode validation
+    const jobColor = (job.color_mode || printConfig.colorMode || 'bw').toLowerCase();
     if (jobColor === 'color' && !caps.color) {
       return { compatible: false, reason: 'Requires Color (Printer is Monochrome)' };
     }
-    if (job.duplex && !caps.duplex) {
-      return { compatible: false, reason: 'Requires Duplex (Not supported)' };
+
+    // 3. Duplex validation
+    const requiresDuplex = Boolean(job.duplex || printConfig.duplex);
+    if (requiresDuplex && !caps.duplex) {
+      return { compatible: false, reason: 'Requires Duplex hardware' };
     }
-    const rawPaper = (job.paper_size || 'A4').toUpperCase();
+
+    // 4. Paper Size validation
+    const rawPaper = (job.paper_size || printConfig.paperSize || 'A4').toUpperCase();
     if (rawPaper.includes('A3') && !caps.a3) {
-      return { compatible: false, reason: 'Requires A3 Paper' };
+      return { compatible: false, reason: 'Requires A3 Paper Size' };
     }
-    if (rawPaper.includes('4X6') && !caps.photo_4x6) {
-      return { compatible: false, reason: 'Requires 4×6 Photo Paper' };
+    if ((rawPaper.includes('4X6') || rawPaper.includes('4×6')) && !caps.photo_4x6 && !caps.a4) {
+      return { compatible: false, reason: 'Requires 4×6 Media Support' };
     }
-    if (rawPaper.includes('5X7') && !caps.photo_5x7) {
-      return { compatible: false, reason: 'Requires 5×7 Photo Paper' };
+    if ((rawPaper.includes('5X7') || rawPaper.includes('5×7')) && !caps.photo_5x7 && !caps.a4) {
+      return { compatible: false, reason: 'Requires 5×7 Media Support' };
     }
     if (rawPaper.includes('LEGAL') && !caps.legal) {
-      return { compatible: false, reason: 'Requires Legal Paper' };
+      return { compatible: false, reason: 'Requires Legal Paper Size' };
     }
-    if ((job.mode === 'photo' || rawPaper.includes('PHOTO')) && printerProfile.type === 'bw') {
-      return { compatible: false, reason: 'B&W printer cannot print photo lab jobs' };
+
+    // 5. Media / Paper Type validation
+    const mediaType = (job.paper_type || job.media_type || printConfig.mediaType || 'plain').toLowerCase();
+    if ((mediaType.includes('glossy') || mediaType.includes('photo')) && !caps.glossy_paper && !caps.photo_4x6 && printerProfile.type !== 'photo') {
+      return { compatible: false, reason: 'Requires Glossy Photo Media Support' };
     }
+    if (mediaType.includes('matte') && !caps.matte_paper && !caps.glossy_paper && printerProfile.type !== 'photo') {
+      return { compatible: false, reason: 'Requires Matte Photo Media Support' };
+    }
+    if ((mediaType.includes('card') || mediaType.includes('thick')) && !caps.card_stock) {
+      return { compatible: false, reason: 'Requires Heavy Card / Thick Media Support' };
+    }
+
+    // 6. Borderless printing validation
+    const requiresBorderless = Boolean(job.borderless || printConfig.borderless);
+    if (requiresBorderless && !caps.borderless) {
+      return { compatible: false, reason: 'Requires Borderless Edge Printing' };
+    }
+
     return { compatible: true };
   }
 
@@ -770,16 +811,37 @@
       if (el) el.checked = Boolean(val);
     };
 
+    // Paper Sizes
     setCb('cap_a4', caps.a4 !== false);
     setCb('cap_a3', caps.a3);
     setCb('cap_a5', caps.a5 !== false);
+    setCb('cap_letter', caps.letter !== false);
     setCb('cap_legal', caps.legal !== false);
+    setCb('cap_custom_paper', caps.custom_paper);
+
+    // Media Types
+    setCb('cap_media_plain', caps.plain_paper !== false && caps.media_plain !== false);
+    setCb('cap_media_glossy', caps.glossy_paper || caps.media_glossy || caps.photo_4x6);
+    setCb('cap_media_matte', caps.matte_paper || caps.media_matte);
+    setCb('cap_media_card', caps.card_stock || caps.media_card);
+    setCb('cap_media_custom', caps.custom_media || caps.media_custom);
+
+    // Print Types & Features
+    setCb('cap_type_photo', caps.supports_photo || caps.type_photo || profile.type === 'photo');
+    setCb('cap_type_image', caps.supports_image !== false && caps.type_image !== false);
+    setCb('cap_type_document', caps.supports_document !== false && caps.type_document !== false);
     setCb('cap_color', caps.color !== false);
     setCb('cap_bw', caps.bw !== false);
     setCb('cap_duplex', caps.duplex);
-    setCb('cap_photo_4x6', caps.photo_4x6);
-    setCb('cap_photo_5x7', caps.photo_5x7);
     setCb('cap_borderless', caps.borderless);
+    setCb('cap_high_quality', caps.high_quality !== false);
+    setCb('cap_photo_grade', caps.photo_grade || caps.photo_4x6);
+
+    // Media Stock & Routing Override
+    const stockEl = document.getElementById('cfgPrinterStockStatus');
+    if (stockEl) stockEl.value = profile.stock_status || 'available';
+    const overrideEl = document.getElementById('cfgPrinterRoutingOverride');
+    if (overrideEl) overrideEl.checked = profile.manual_override_allowed !== false;
 
     printerConfigModal.classList.add('active');
   }
@@ -811,17 +873,41 @@
         return el ? el.checked : false;
       };
 
+      const stockEl = document.getElementById('cfgPrinterStockStatus');
+      const stock_status = stockEl ? stockEl.value : 'available';
+      const overrideEl = document.getElementById('cfgPrinterRoutingOverride');
+      const manual_override_allowed = overrideEl ? overrideEl.checked : true;
+
       const capabilities = {
+        // Paper sizes
         a4: getCb('cap_a4'),
         a3: getCb('cap_a3'),
         a5: getCb('cap_a5'),
+        letter: getCb('cap_letter'),
         legal: getCb('cap_legal'),
+        custom_paper: getCb('cap_custom_paper'),
+        photo_4x6: getCb('cap_media_glossy') || getCb('cap_type_photo'),
+        photo_5x7: getCb('cap_type_photo'),
+
+        // Media types
+        plain_paper: getCb('cap_media_plain'),
+        glossy_paper: getCb('cap_media_glossy'),
+        matte_paper: getCb('cap_media_matte'),
+        card_stock: getCb('cap_media_card'),
+        custom_media: getCb('cap_media_custom'),
+
+        // Print types
+        supports_photo: getCb('cap_type_photo'),
+        supports_image: getCb('cap_type_image'),
+        supports_document: getCb('cap_type_document'),
+
+        // Features
         color: getCb('cap_color'),
         bw: getCb('cap_bw'),
         duplex: getCb('cap_duplex'),
-        photo_4x6: getCb('cap_photo_4x6'),
-        photo_5x7: getCb('cap_photo_5x7'),
         borderless: getCb('cap_borderless'),
+        high_quality: getCb('cap_high_quality'),
+        photo_grade: getCb('cap_photo_grade'),
       };
 
       if (!multiPrinterConfig.printersConfig) multiPrinterConfig.printersConfig = {};
@@ -831,6 +917,8 @@
         type,
         priority,
         enabled,
+        stock_status,
+        manual_override_allowed,
         capabilities,
       };
 
@@ -871,13 +959,16 @@
           setCb('cap_a3', caps.a3);
           setCb('cap_a5', caps.a5);
           setCb('cap_legal', caps.legal);
-          setCb('cap_photo_4x6', caps.photo_4x6);
-          setCb('cap_photo_5x7', caps.photo_5x7);
           setCb('cap_borderless', caps.borderless);
+          if (caps.photo_4x6) {
+            setCb('cap_media_glossy', true);
+            setCb('cap_type_photo', true);
+            setCb('cap_photo_grade', true);
+          }
           if (caps.detectedType && cfgPrinterType) {
             cfgPrinterType.value = caps.detectedType;
           }
-          showToast('Hardware capabilities auto-detected from Windows driver!', 'success');
+          showToast('Hardware capabilities auto-detected from Windows driver! (Review overrides below)', 'success');
         }
       } catch (e) {
         showToast('Detection error: ' + e.message, 'warning');
@@ -1226,10 +1317,13 @@
                 <span class="customer-phone">${job.customer_phone || ''}</span>
               </div>
               <div class="order-specs-chips">
+                ${(job.needs_shop_preparation || job.status === 'waiting_for_preparation') ? '<span class="spec-chip" style="background:#7E22CE; color:white; font-weight:800; border-color:#6B21A8;">🛠️ NEEDS SHOP PREP</span>' : ''}
+                ${(job.print_type === 'photo' || job.mode === 'photo') ? '<span class="spec-chip color" style="font-weight:700;">📸 PHOTO LAB</span>' : (job.print_type === 'image' || job.mode === 'image') ? '<span class="spec-chip" style="font-weight:700;">🖼️ IMAGE PRINT</span>' : ''}
                 <span class="spec-chip ${job.color_mode === 'color' ? 'color' : 'bw'}">${colorMode}</span>
                 <span class="spec-chip">${pages} Pages × ${copies} Copy</span>
                 <span class="spec-chip">${duplexMode}</span>
                 <span class="spec-chip">${basePaper}</span>
+                ${(job.paper_type && job.paper_type !== 'plain') ? `<span class="spec-chip" style="background:#EFF6FF; color:#1D4ED8; font-weight:700;">${job.paper_type.replace('_', ' ').toUpperCase()}</span>` : ''}
                 ${isSpiral ? '<span class="spec-chip color" style="font-weight:700;">🌀 Spiral Binding</span>' : ''}
                 ${isStapled ? '<span class="spec-chip" style="background:#eff6ff; color:#1d4ed8; border-color:#bfdbfe; font-weight:700;">📎 Corner Staple</span>' : ''}
               </div>
@@ -1246,7 +1340,9 @@
 
             <div class="order-actions">
               ${
-                isCompleted
+                (job.needs_shop_preparation || job.status === 'waiting_for_preparation')
+                  ? `<button class="btn btn-primary btn-sm btn-open-shop-studio" data-id="${job.id}" style="background:#7E22CE; border-color:#6B21A8;">✂️ Open Studio</button>`
+                  : isCompleted
                   ? `<span class="badge-chip green" style="padding: 6px 12px; font-weight: 700; border-radius: 6px;">✓ PRINT COMPLETED</span>
                      <button class="btn btn-secondary btn-sm btn-print-job" data-id="${job.id}" title="Send duplicate to printer">🔄 Reprint All</button>
                      ${
@@ -1263,6 +1359,9 @@
                   ? `<button class="btn btn-primary btn-sm btn-confirm-cash" data-id="${job.id}">💵 Cash Paid & Print</button>`
                   : `<button class="btn btn-primary btn-sm btn-print-job" data-id="${job.id}">🖨️ Print Now</button>`
               }
+              <button class="btn btn-secondary btn-sm btn-open-shop-studio" data-id="${job.id}" title="Open Counter Print Studio to calibrate crop, paper & color">
+                ✂️ Studio
+              </button>
               <button class="btn btn-secondary btn-sm btn-preview-job" data-id="${job.id}">
                 👁️ Preview
               </button>
@@ -1429,6 +1528,15 @@
       });
     });
 
+    // Bind action buttons: Open Shop Studio (Counter Calibration & Preparation)
+    document.querySelectorAll('.btn-open-shop-studio').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        const job = activeJobs.find((j) => j.id === id);
+        if (job) openShopStudio(job);
+      });
+    });
+
     // Bind action buttons: Delete Media (Owner Privacy & Storage Management)
     document.querySelectorAll('.btn-delete-job-media').forEach((btn) => {
       btn.addEventListener('click', async (e) => {
@@ -1451,6 +1559,278 @@
       });
     });
   }
+
+  // --- COUNTER PRINT STUDIO (PREPARATION, CALIBRATION & HARDWARE ROUTING) ---
+  let activeStudioJob = null;
+  let studioRotation = 0;
+
+  async function openShopStudio(job) {
+    activeStudioJob = job;
+    studioRotation = 0;
+
+    const modal = document.getElementById('shopStudioModal');
+    if (!modal) return;
+
+    const tokenDisplay = job.token_number || `#${(job.id || '').substring(0, 4).toUpperCase()}`;
+    const custName = job.customer_name || 'Customer';
+    const titleEl = document.getElementById('studioModalTitle');
+    const subEl = document.getElementById('studioModalSub');
+    if (titleEl) titleEl.textContent = `Print Studio — Token ${tokenDisplay} (${custName})`;
+    if (subEl) subEl.textContent = `File: ${job.file_name || 'Media'} • Configure print parameters, calibrate transforms & route`;
+
+    const printConfig = job.print_config || {};
+
+    const printTypeEl = document.getElementById('studioPrintType');
+    if (printTypeEl) {
+      printTypeEl.value = (job.print_type || printConfig.printType || job.mode || 'document').toLowerCase();
+    }
+
+    const colorModeEl = document.getElementById('studioColorMode');
+    if (colorModeEl) {
+      colorModeEl.value = (job.color_mode || printConfig.colorMode || 'color').toLowerCase();
+    }
+
+    const paperSizeEl = document.getElementById('studioPaperSize');
+    if (paperSizeEl) {
+      const ps = (job.paper_size || printConfig.paperSize || 'a4').toLowerCase();
+      paperSizeEl.value = ps.includes('a3') ? 'a3' : ps.includes('4x6') || ps.includes('4×6') ? '4x6' : ps.includes('5x7') || ps.includes('5×7') ? '5x7' : ps.includes('legal') ? 'legal' : 'a4';
+    }
+
+    const mediaTypeEl = document.getElementById('studioMediaType');
+    if (mediaTypeEl) {
+      const mt = (job.paper_type || job.media_type || printConfig.mediaType || 'plain').toLowerCase();
+      mediaTypeEl.value = mt.includes('glossy') ? 'glossy_photo' : mt.includes('matte') ? 'matte_photo' : mt.includes('card') ? 'card_thick' : 'plain';
+    }
+
+    const orientationEl = document.getElementById('studioOrientation');
+    if (orientationEl) {
+      orientationEl.value = (job.orientation || printConfig.orientation || 'portrait').toLowerCase();
+    }
+
+    const copiesEl = document.getElementById('studioCopies');
+    if (copiesEl) {
+      copiesEl.value = String(job.copies || printConfig.copies || 1);
+    }
+
+    const duplexEl = document.getElementById('studioDuplex');
+    if (duplexEl) {
+      duplexEl.value = String(Boolean(job.duplex || printConfig.duplex));
+    }
+
+    // Reset adjustment sliders
+    const brightEl = document.getElementById('studioBrightness');
+    if (brightEl) brightEl.value = '0';
+    const contrastEl = document.getElementById('studioContrast');
+    if (contrastEl) contrastEl.value = '0';
+
+    // Source image
+    const imgEl = document.getElementById('studioSourceImg');
+    if (imgEl) {
+      imgEl.src = '';
+      imgEl.style.filter = 'none';
+      imgEl.style.transform = 'none';
+      try {
+        let mediaUrl = null;
+        if (window.quickprintApi?.getLocalMediaUrl) {
+          mediaUrl = await window.quickprintApi.getLocalMediaUrl(job.id);
+        }
+        if (!mediaUrl && job.file_url) mediaUrl = job.file_url;
+        if (mediaUrl) imgEl.src = mediaUrl;
+      } catch (err) {
+        console.warn('Failed to load media for studio:', err);
+      }
+    }
+
+    refreshStudioPrinterList();
+    modal.classList.add('active');
+  }
+
+  function refreshStudioPrinterList() {
+    const sel = document.getElementById('studioTargetPrinterSelect');
+    if (!sel || !activeStudioJob) return;
+
+    sel.innerHTML = '';
+    const tempJob = {
+      ...activeStudioJob,
+      print_type: document.getElementById('studioPrintType')?.value || activeStudioJob.print_type,
+      color_mode: document.getElementById('studioColorMode')?.value || activeStudioJob.color_mode,
+      paper_size: document.getElementById('studioPaperSize')?.value || activeStudioJob.paper_size,
+      paper_type: document.getElementById('studioMediaType')?.value || activeStudioJob.paper_type,
+      duplex: document.getElementById('studioDuplex')?.value === 'true',
+    };
+
+    let firstCompPrinter = null;
+    availablePrinters.forEach((pName) => {
+      const prof = multiPrinterConfig.printersConfig?.[pName] || { name: pName, customName: pName };
+      const comp = checkPrinterCompatibility(tempJob, prof);
+      const opt = document.createElement('option');
+      opt.value = pName;
+      opt.textContent = `${prof.customName || pName} ${comp.compatible ? '✓ [Compatible]' : '⚠️ (' + comp.reason + ')'}`;
+      if (comp.compatible && !firstCompPrinter) firstCompPrinter = pName;
+      if (pName === activeStudioJob.assigned_printer) opt.selected = true;
+      sel.appendChild(opt);
+    });
+
+    if (!activeStudioJob.assigned_printer && firstCompPrinter) {
+      sel.value = firstCompPrinter;
+    }
+
+    updateStudioCompatibilityBadge();
+  }
+
+  function updateStudioCompatibilityBadge() {
+    const sel = document.getElementById('studioTargetPrinterSelect');
+    const badge = document.getElementById('studioPrinterCompBadge');
+    const reasonEl = document.getElementById('studioPrinterCompReason');
+    if (!sel || !activeStudioJob) return;
+
+    const chosenPrinter = sel.value;
+    const prof = multiPrinterConfig.printersConfig?.[chosenPrinter] || { name: chosenPrinter };
+    const tempJob = {
+      ...activeStudioJob,
+      print_type: document.getElementById('studioPrintType')?.value || activeStudioJob.print_type,
+      color_mode: document.getElementById('studioColorMode')?.value || activeStudioJob.color_mode,
+      paper_size: document.getElementById('studioPaperSize')?.value || activeStudioJob.paper_size,
+      paper_type: document.getElementById('studioMediaType')?.value || activeStudioJob.paper_type,
+      duplex: document.getElementById('studioDuplex')?.value === 'true',
+    };
+
+    const comp = checkPrinterCompatibility(tempJob, prof);
+    if (comp.compatible) {
+      if (badge) {
+        badge.className = 'badge-chip green';
+        badge.textContent = '✓ Hardware Compatible';
+      }
+      if (reasonEl) reasonEl.textContent = `Eligible to receive and spool this job without hardware error.`;
+    } else {
+      if (badge) {
+        badge.className = 'badge-chip red';
+        badge.textContent = '❌ Incompatible Hardware';
+      }
+      if (reasonEl) reasonEl.textContent = `Warning: ${comp.reason}. Spooling may fail or print incorrectly.`;
+    }
+  }
+
+  function updateStudioImgTransform() {
+    const imgEl = document.getElementById('studioSourceImg');
+    const bright = document.getElementById('studioBrightness')?.value || '0';
+    const contrast = document.getElementById('studioContrast')?.value || '0';
+    if (imgEl) {
+      imgEl.style.transform = `rotate(${studioRotation}deg)`;
+      imgEl.style.filter = `brightness(${100 + parseInt(bright, 10)}%) contrast(${100 + parseInt(contrast, 10)}%)`;
+    }
+  }
+
+  const saveStudioConfig = (autoPrint = false) => {
+    if (!activeStudioJob) return;
+    const printType = document.getElementById('studioPrintType')?.value || 'document';
+    const colorMode = document.getElementById('studioColorMode')?.value || 'color';
+    const paperSize = document.getElementById('studioPaperSize')?.value || 'a4';
+    const mediaType = document.getElementById('studioMediaType')?.value || 'plain';
+    const orientation = document.getElementById('studioOrientation')?.value || 'portrait';
+    const copies = parseInt(document.getElementById('studioCopies')?.value || '1', 10);
+    const duplex = document.getElementById('studioDuplex')?.value === 'true';
+    const assignedPrinter = document.getElementById('studioTargetPrinterSelect')?.value || activeStudioJob.assigned_printer;
+
+    activeStudioJob.print_type = printType;
+    activeStudioJob.color_mode = colorMode;
+    activeStudioJob.paper_size = paperSize.toUpperCase();
+    activeStudioJob.paper_type = mediaType;
+    activeStudioJob.orientation = orientation;
+    activeStudioJob.copies = copies;
+    activeStudioJob.duplex = duplex;
+    activeStudioJob.assigned_printer = assignedPrinter;
+    activeStudioJob.assignment_type = 'manual';
+    activeStudioJob.needs_shop_preparation = false;
+
+    if (!activeStudioJob.print_config) activeStudioJob.print_config = {};
+    activeStudioJob.print_config = {
+      ...activeStudioJob.print_config,
+      printType,
+      colorMode,
+      paperSize,
+      mediaType,
+      orientation,
+      copies,
+      duplex,
+      rotation: studioRotation,
+      brightness: parseInt(document.getElementById('studioBrightness')?.value || '0', 10),
+      contrast: parseInt(document.getElementById('studioContrast')?.value || '0', 10),
+    };
+
+    if (activeStudioJob.status === 'waiting_for_preparation') {
+      activeStudioJob.status = 'ready_to_print';
+    }
+
+    showToast(`Preparation saved for Token ${activeStudioJob.token_number}!`, 'success');
+    document.getElementById('shopStudioModal')?.classList.remove('active');
+    renderQueue();
+
+    if (autoPrint) {
+      executePrint(activeStudioJob);
+    }
+  };
+
+  // Bind shop studio static controls
+  document.getElementById('btnCloseShopStudioModal')?.addEventListener('click', () => {
+    document.getElementById('shopStudioModal')?.classList.remove('active');
+  });
+
+  document.getElementById('studioPrintType')?.addEventListener('change', refreshStudioPrinterList);
+  document.getElementById('studioColorMode')?.addEventListener('change', refreshStudioPrinterList);
+  document.getElementById('studioPaperSize')?.addEventListener('change', refreshStudioPrinterList);
+  document.getElementById('studioMediaType')?.addEventListener('change', refreshStudioPrinterList);
+  document.getElementById('studioDuplex')?.addEventListener('change', refreshStudioPrinterList);
+  document.getElementById('studioTargetPrinterSelect')?.addEventListener('change', updateStudioCompatibilityBadge);
+
+  document.getElementById('studioBrightness')?.addEventListener('input', updateStudioImgTransform);
+  document.getElementById('studioContrast')?.addEventListener('input', updateStudioImgTransform);
+
+  document.getElementById('btnStudioRotateCcw')?.addEventListener('click', () => {
+    studioRotation = (studioRotation - 90) % 360;
+    updateStudioImgTransform();
+  });
+  document.getElementById('btnStudioRotateCw')?.addEventListener('click', () => {
+    studioRotation = (studioRotation + 90) % 360;
+    updateStudioImgTransform();
+  });
+  document.getElementById('btnStudioAutoEnhance')?.addEventListener('click', () => {
+    const b = document.getElementById('studioBrightness');
+    const c = document.getElementById('studioContrast');
+    if (b) b.value = '8';
+    if (c) c.value = '12';
+    updateStudioImgTransform();
+    showToast('Applied studio auto-enhancement', 'info');
+  });
+  document.getElementById('btnStudioReset')?.addEventListener('click', () => {
+    studioRotation = 0;
+    const b = document.getElementById('studioBrightness');
+    const c = document.getElementById('studioContrast');
+    if (b) b.value = '0';
+    if (c) c.value = '0';
+    updateStudioImgTransform();
+  });
+
+  document.getElementById('btnStudioDownloadFile')?.addEventListener('click', async () => {
+    if (!activeStudioJob) return;
+    try {
+      if (activeStudioJob.file_url) {
+        const a = document.createElement('a');
+        a.href = activeStudioJob.file_url;
+        a.download = activeStudioJob.file_name || 'media';
+        a.target = '_blank';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      }
+      showToast('Initiating download...', 'info');
+    } catch (e) {
+      showToast('Download error: ' + e.message, 'warning');
+    }
+  });
+
+  document.getElementById('btnStudioSaveOnly')?.addEventListener('click', () => saveStudioConfig(false));
+  document.getElementById('btnStudioPrintNow')?.addEventListener('click', () => saveStudioConfig(true));
 
   // Execute Real Print via physical spooler pipeline (with page-level & multi-printer support)
   async function executePrint(job, printOptions = {}) {

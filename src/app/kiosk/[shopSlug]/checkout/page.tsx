@@ -245,6 +245,15 @@ export default function KioskCheckoutPage() {
       formData.append('price', String(price));
       formData.append('payment_mode', paymentMode);
 
+      const storedPrintConfig = sessionStorage.getItem('qp_print_config');
+      if (storedPrintConfig) {
+        formData.append('print_config', storedPrintConfig);
+      }
+      const storedNeedsShopPrep = sessionStorage.getItem('qp_needs_shop_prep');
+      if (storedNeedsShopPrep === 'true') {
+        formData.append('needs_shop_preparation', 'true');
+      }
+
       // If online: in test environment we simulate immediate payment success
       if (paymentMode === 'online') {
         formData.append('simulate_paid', 'true');

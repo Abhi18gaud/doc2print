@@ -1,7 +1,7 @@
 import { PriceConfig } from '@/types/database';
 
 export interface PriceCalculationParams {
-  mode?: 'document' | 'photo';
+  mode?: 'document' | 'photo' | 'image';
   pages: number;
   copies: number;
   colorMode: 'bw' | 'color';

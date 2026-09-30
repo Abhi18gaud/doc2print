@@ -226,43 +226,99 @@ export async function POST(request: NextRequest) {
 
     const dailyTokenNumber = (todayJobsCount || 0) + 1;
 
+    const rawPrintConfig = formData.get('print_config') as string | null;
+    let printConfig: Record<string, unknown> | null = null;
+    if (rawPrintConfig) {
+      try {
+        printConfig = JSON.parse(rawPrintConfig);
+      } catch (e) {}
+    }
+
+    const needsShopPreparation =
+      formData.get('needs_shop_preparation') === 'true' ||
+      Boolean(printConfig?.needsShopPreparation);
+
+    // If customer selected "Send to Shop for Preparation", initial status is waiting_for_preparation
+    const initialPrintStatus = needsShopPreparation
+      ? 'waiting_for_preparation'
+      : printStatus;
+
     // 3. Insert job record into Supabase (Permanent unique UUID id + scoped daily_token)
-    const { data: job, error: insertError } = await client
-      .from('jobs')
-      .insert({
-        shop_id: shopId,
-        printer_id: printerId,
-        token_number: dailyTokenNumber,
-        file_url: fileUrl,
-        file_name: file.name,
-        file_type: normFileType,
-        file_size_bytes: file.size,
-        pages,
-        copies,
-        paper_size: finalPaperSize,
-        color_mode: colorMode === 'color' ? 'color' : 'bw',
+    const baseJobPayload = {
+      shop_id: shopId,
+      printer_id: printerId,
+      token_number: dailyTokenNumber,
+      file_url: fileUrl,
+      file_name: file.name,
+      file_type: normFileType,
+      file_size_bytes: file.size,
+      pages,
+      copies,
+      paper_size: finalPaperSize,
+      color_mode: colorMode === 'color' ? 'color' : 'bw',
+      duplex,
+      orientation: orientation === 'landscape' ? 'landscape' : 'portrait',
+      price: finalPrice,
+      payment_mode: paymentMode === 'online' ? 'online' : 'cash',
+      payment_status: paymentStatus,
+      print_status: initialPrintStatus,
+      queued_at: isPaidOnline && !needsShopPreparation ? new Date().toISOString() : null,
+    };
+
+    // Extended payload with canonical configuration
+    const extendedJobPayload = {
+      ...baseJobPayload,
+      paper_type: paperType,
+      quality,
+      photo_size: photoSize || null,
+      selected_pages: selectedPages.length > 0 ? selectedPages : null,
+      print_config: printConfig || {
+        mode,
+        paperSize: rawPaperSize,
+        paperType,
+        quality,
+        photoSize,
+        photoPaper,
+        photoQuality,
+        colorMode,
         duplex,
-        orientation: orientation === 'landscape' ? 'landscape' : 'portrait',
-        price: finalPrice,
-        payment_mode: paymentMode === 'online' ? 'online' : 'cash',
-        payment_status: paymentStatus,
-        print_status: printStatus,
-        queued_at: isPaidOnline ? new Date().toISOString() : null,
-      })
+        orientation,
+        copies,
+        needsShopPreparation,
+      },
+      needs_shop_preparation: needsShopPreparation,
+    };
+
+    let jobRecord: unknown = null;
+    let { data: job, error: insertError } = await client
+      .from('jobs')
+      .insert(extendedJobPayload)
       .select()
       .single();
 
     if (insertError) {
-      console.error('Supabase job insert error:', insertError);
-      return NextResponse.json(
-        { error: 'Failed to create job record: ' + insertError.message },
-        { status: 500 }
-      );
+      console.warn('Extended job insert returned warning/error, retrying with base columns:', insertError.message);
+      // Fallback in case columns do not exist in current Postgres instance
+      const retry = await client
+        .from('jobs')
+        .insert(baseJobPayload)
+        .select()
+        .single();
+      if (retry.error) {
+        console.error('Supabase job insert error:', retry.error);
+        return NextResponse.json(
+          { error: 'Failed to create job record: ' + retry.error.message },
+          { status: 500 }
+        );
+      }
+      jobRecord = retry.data;
+    } else {
+      jobRecord = job;
     }
 
     return NextResponse.json({
       success: true,
-      job,
+      job: jobRecord,
     });
   } catch (error: unknown) {
     console.error('Error creating job:', error);
